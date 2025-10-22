@@ -13,7 +13,7 @@ async function main() {
   const db = drizzle(pool);
 
   const username = process.env.ADMIN_USERNAME ?? 'admin';
-  const plain = process.env.ADMIN_PASSWORD ?? 'StrongPass#123';
+  const plain = process.env.ADMIN_PASSWORD ?? 'Ancir2025';
 
   // سنخزن الـ hash في عمود password
   const hashed = await bcrypt.hash(plain, 10);

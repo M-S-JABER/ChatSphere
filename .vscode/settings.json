@@ -17,10 +17,10 @@
         {
             "ssh": "Disabled",
             "previewLimit": 50,
-            "server": "10.255.255.254",
+            "server": "localhost",
             "port": 5432,
             "driver": "PostgreSQL",
-            "name": "whatsapp-db",
+            "name": "postgres",
             "database": "postgres",
             "username": "postgres",
             "password": "Ancir2025"
