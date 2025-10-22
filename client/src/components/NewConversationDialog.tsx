@@ -11,22 +11,43 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { MessageSquarePlus } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface NewConversationDialogProps {
-  onCreateConversation: (phone: string) => void;
+  onCreateConversation: (payload: { phone: string; body?: string }) => void;
+  triggerClassName?: string;
+  showLabel?: boolean;
 }
 
-export function NewConversationDialog({ onCreateConversation }: NewConversationDialogProps) {
+export function NewConversationDialog({
+  onCreateConversation,
+  triggerClassName,
+  showLabel = true,
+}: NewConversationDialogProps) {
   const [open, setOpen] = useState(false);
   const [phone, setPhone] = useState("");
+  const [message, setMessage] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!phone.trim()) return;
-    
-    onCreateConversation(phone.trim());
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    const trimmed = phone.trim();
+    if (!trimmed) return;
+    const isValid = /^\+?\d{6,15}$/.test(trimmed);
+    if (!isValid) {
+      setPhone("");
+      return;
+    }
+
+    const trimmedMessage = message.trim();
+
+    onCreateConversation({
+      phone: trimmed,
+      body: trimmedMessage.length > 0 ? trimmedMessage : undefined,
+    });
     setPhone("");
+    setMessage("");
     setOpen(false);
   };
 
@@ -34,12 +55,12 @@ export function NewConversationDialog({ onCreateConversation }: NewConversationD
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button
-          size="icon"
           variant="default"
-          className="rounded-full fixed bottom-6 right-6 h-14 w-14 shadow-lg z-10"
+          className={cn("h-9 gap-2 rounded-full px-4", triggerClassName)}
           data-testid="button-new-conversation"
         >
-          <MessageSquarePlus className="h-6 w-6" />
+          <MessageSquarePlus className="h-4 w-4" />
+          {showLabel && <span>New chat</span>}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md" data-testid="dialog-new-conversation">
@@ -58,13 +79,23 @@ export function NewConversationDialog({ onCreateConversation }: NewConversationD
                 type="tel"
                 placeholder="+1234567890"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                onChange={(event) => setPhone(event.target.value)}
                 className="font-mono"
                 data-testid="input-phone-number"
               />
               <p className="text-xs text-muted-foreground">
-                Include country code (e.g., +1 for US, +44 for UK)
+                Enter digits only, optionally starting with +. Minimum 6 digits.
               </p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="message">Message (optional)</Label>
+              <Textarea
+                id="message"
+                placeholder="Type a message to send immediately"
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                data-testid="input-initial-message"
+              />
             </div>
           </div>
           <DialogFooter>
@@ -76,7 +107,7 @@ export function NewConversationDialog({ onCreateConversation }: NewConversationD
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={!phone.trim()} data-testid="button-start-chat">
+            <Button type="submit" disabled={!/^\+?\d{6,15}$/.test(phone.trim())} data-testid="button-start-chat">
               Start Chat
             </Button>
           </DialogFooter>

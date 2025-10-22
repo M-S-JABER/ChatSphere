@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Users, Settings, BarChart3, Bug, Code } from "lucide-react";
+import { LogOut, Users, Settings, BarChart3 } from "lucide-react";
 
 export function UserMenu() {
   const { user, logoutMutation } = useAuth();
@@ -78,22 +78,6 @@ export function UserMenu() {
             >
               <Users className="mr-2 h-4 w-4" />
               <span>Manage Users</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => setLocation("/diagnostics")}
-              data-testid="button-nav-diagnostics"
-              className="cursor-pointer"
-            >
-              <Bug className="mr-2 h-4 w-4" />
-              <span>Webhook Diagnostics</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => setLocation("/admin/api-playground")}
-              data-testid="button-nav-api-playground"
-              className="cursor-pointer"
-            >
-              <Code className="mr-2 h-4 w-4" />
-              <span>Custom API</span>
             </DropdownMenuItem>
           </>
         )}

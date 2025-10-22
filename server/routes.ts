@@ -300,7 +300,14 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
 
   // Admin endpoints to inspect webhook events and configure behavior
   app.get('/api/webhooks/events', requireAdmin, async (req: Request, res: Response) => {
-    const items = await storage.getWebhookEvents();
+    const { webhookId } = req.query;
+    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+    const items = await storage.getWebhookEvents(
+      limit && Number.isFinite(limit) ? limit : undefined,
+      typeof webhookId === "string" && webhookId.trim().length > 0
+        ? { webhookId: webhookId.trim() }
+        : undefined
+    );
     res.json({ items });
   });
 
@@ -398,6 +405,33 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
       const pageSize = parseInt(req.query.page_size as string) || 50;
       const result = await storage.getMessages(id, page, pageSize);
       res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/conversations", async (req: Request, res: Response) => {
+    try {
+      const { phone, displayName } = req.body as {
+        phone?: string;
+        displayName?: string | null;
+      };
+
+      const trimmedPhone = typeof phone === "string" ? phone.trim() : "";
+      if (!trimmedPhone) {
+        return res.status(400).json({ error: "Phone number is required." });
+      }
+
+      let conversation = await storage.getConversationByPhone(trimmedPhone);
+
+      if (!conversation) {
+        conversation = await storage.createConversation({
+          phone: trimmedPhone,
+          displayName: typeof displayName === "string" ? displayName.trim() || null : null,
+        });
+      }
+
+      res.json({ conversation });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -604,6 +638,22 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
         headers: req.headers as Record<string, any>,
       });
 
+      try {
+        await storage.logWebhookEvent({
+          webhookId: "custom",
+          headers: req.headers,
+          query: req.query,
+          body: null,
+          response: {
+            method: "GET",
+            status: config.get.status,
+            body,
+          },
+        });
+      } catch (logError) {
+        console.error("Failed to log custom GET webhook event:", logError);
+      }
+
       res.status(config.get.status).type(config.get.contentType || "text/plain").send(body);
     } catch (error: any) {
       console.error("Custom webhook GET error:", error);
@@ -626,11 +676,61 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
 
       if ((config.post.contentType || "").includes("application/json")) {
         try {
-          return res.status(config.post.status).type(config.post.contentType).send(body ? JSON.parse(body) : {});
+          const parsed = body ? JSON.parse(body) : {};
+
+          try {
+            await storage.logWebhookEvent({
+              webhookId: "custom",
+              headers: req.headers,
+              query: req.query,
+              body: req.body,
+              response: {
+                method: "POST",
+                status: config.post.status,
+                body: parsed,
+              },
+            });
+          } catch (logError) {
+            console.error("Failed to log custom POST webhook event:", logError);
+          }
+
+          return res.status(config.post.status).type(config.post.contentType).send(parsed);
         } catch {
+          try {
+            await storage.logWebhookEvent({
+              webhookId: "custom",
+              headers: req.headers,
+              query: req.query,
+              body: req.body,
+              response: {
+                method: "POST",
+                status: config.post.status,
+                body,
+              },
+            });
+          } catch (logError) {
+            console.error("Failed to log custom POST webhook event:", logError);
+          }
+
           res.status(config.post.status).type(config.post.contentType).send(body);
           return;
         }
+      }
+
+      try {
+        await storage.logWebhookEvent({
+          webhookId: "custom",
+          headers: req.headers,
+          query: req.query,
+          body: req.body,
+          response: {
+            method: "POST",
+            status: config.post.status,
+            body,
+          },
+        });
+      } catch (logError) {
+        console.error("Failed to log custom POST webhook event:", logError);
       }
 
       res.status(config.post.status).type(config.post.contentType || "text/plain").send(body);

@@ -84,7 +84,11 @@ export default function Statistics() {
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <Link href="/">
-              <Button variant="ghost" size="icon" data-testid="button-back">
+              <Button
+                variant="ghost"
+                size="icon"
+                data-testid="button-back"
+              >
                 <ArrowLeft className="h-5 w-5" />
               </Button>
             </Link>

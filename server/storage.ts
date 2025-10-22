@@ -79,7 +79,7 @@ export interface IStorage {
 
   // Webhook events
   logWebhookEvent(event: any): Promise<any>;
-  getWebhookEvents(limit?: number): Promise<any[]>;
+  getWebhookEvents(limit?: number, filters?: { webhookId?: string }): Promise<any[]>;
 
   // App settings
   getDefaultWhatsappInstance(): Promise<WhatsappInstanceConfig | null>;
@@ -380,8 +380,14 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async getWebhookEvents(limit: number = 200): Promise<any[]> {
-    return await db.select().from(webhookEvents).orderBy(desc(webhookEvents.createdAt)).limit(limit);
+  async getWebhookEvents(limit: number = 200, filters?: { webhookId?: string }): Promise<any[]> {
+    let query = db.select().from(webhookEvents) as any;
+
+    if (filters?.webhookId) {
+      query = query.where(eq(webhookEvents.webhookId, filters.webhookId));
+    }
+
+    return await query.orderBy(desc(webhookEvents.createdAt)).limit(limit);
   }
 
   async deleteWebhookEvents(): Promise<void> {

@@ -4,7 +4,6 @@ import { Link } from "wouter";
 import { type Conversation, type Message } from "@shared/schema";
 import { ConversationList } from "@/components/ConversationList";
 import { MessageThread } from "@/components/MessageThread";
-import { NewConversationDialog } from "@/components/NewConversationDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { UserMenu } from "@/components/UserMenu";
 import { Button } from "@/components/ui/button";
@@ -155,20 +154,35 @@ export default function Home() {
     });
   };
 
-  const handleCreateConversation = (phone: string) => {
-    sendMessageMutation.mutate(
-      {
-        to: phone,
-        body: "Hi! 👋",
-      },
-      {
-        onSuccess: (data: any) => {
-          if (data.message?.conversationId) {
-            setSelectedConversationId(data.message.conversationId);
-          }
-        },
+  const createConversationMutation = useMutation({
+    mutationFn: async ({ phone, body }: { phone: string; body?: string }) => {
+      const res = await apiRequest("POST", "/api/conversations", { phone });
+      return res.json();
+    },
+    onSuccess: (data: any, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
+      if (data.conversation?.id) {
+        setSelectedConversationId(data.conversation.id);
       }
-    );
+      const trimmedBody = variables.body?.trim();
+      if (trimmedBody) {
+        sendMessageMutation.mutate({
+          to: data.conversation?.phone ?? variables.phone,
+          body: trimmedBody,
+        });
+      }
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to start conversation",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleCreateConversation = (payload: { phone: string; body?: string }) => {
+    createConversationMutation.mutate(payload);
   };
 
   return (
@@ -182,6 +196,7 @@ export default function Home() {
           showArchived={showArchived}
           onToggleArchived={() => setShowArchived(!showArchived)}
           onArchive={(id, archived) => archiveMutation.mutate({ id, archived })}
+          onCreateConversation={handleCreateConversation}
         />
       </div>
 
@@ -212,7 +227,6 @@ export default function Home() {
         />
       </div>
 
-      <NewConversationDialog onCreateConversation={handleCreateConversation} />
     </div>
   );
 }

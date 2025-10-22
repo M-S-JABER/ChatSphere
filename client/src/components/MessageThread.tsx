@@ -2,7 +2,7 @@ import { type Conversation, type Message } from "@shared/schema";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MoreVertical, Search, Upload } from "lucide-react";
+import { MoreVertical, Upload } from "lucide-react";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -218,9 +218,6 @@ export function MessageThread({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button size="icon" variant="ghost" data-testid="button-search">
-              <Search className="h-5 w-5" />
-            </Button>
             <Button size="icon" variant="ghost" data-testid="button-menu">
               <MoreVertical className="h-5 w-5" />
             </Button>

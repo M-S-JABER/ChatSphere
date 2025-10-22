@@ -1,77 +1,104 @@
 import React, { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import { useWebhookEvents } from "@/hooks/use-webhook-events";
+import { apiRequest } from "@/lib/queryClient";
+import { WebhookEventList } from "@/components/WebhookEventList";
 
 export default function WebhookEventsPage() {
   const { toast } = useToast();
-  const [selectedInstance, setSelectedInstance] = useState<string | undefined>(undefined);
-  const { data: eventsData, refetch } = useQuery<{ items: any[] }>({
-    queryKey: ['/api/webhooks/events', selectedInstance],
-    queryFn: async () => {
-      const res = await fetch(`/api/webhooks/events${selectedInstance ? `?instanceId=${selectedInstance}` : ''}`, { credentials: 'include' });
-      if (!res.ok) throw new Error(await res.text());
-      return res.json();
-    },
+  const [webhookIdFilter, setWebhookIdFilter] = useState("");
+
+  const {
+    data: eventsData,
+    isLoading,
+    isFetching,
+    refetch,
+  } = useWebhookEvents({
+    webhookId: webhookIdFilter.trim() ? webhookIdFilter.trim() : undefined,
   });
 
-  const deleteOne = useMutation<any, any, string>({
+  const deleteOne = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/webhooks/events/${id}`, { method: 'DELETE', credentials: 'include' });
-      if (!res.ok) throw new Error(await res.text());
+      const res = await apiRequest("DELETE", `/api/webhooks/events/${id}`);
       return res.json();
     },
     onSuccess: () => {
-      toast({ title: 'Deleted' });
+      toast({ title: "Deleted" });
       refetch();
     },
-    onError: (err: any) => toast({ variant: 'destructive', title: 'Delete failed', description: err.message }),
+    onError: (error: Error) =>
+      toast({
+        variant: "destructive",
+        title: "Delete failed",
+        description: error.message,
+      }),
   });
 
-  const deleteBulk = useMutation<any, any, void>({
+  const deleteBulk = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/webhooks/events${selectedInstance ? `?instanceId=${selectedInstance}` : ''}`, { method: 'DELETE', credentials: 'include' });
-      if (!res.ok) throw new Error(await res.text());
+      const res = await apiRequest("DELETE", `/api/webhooks/events`);
       return res.json();
     },
     onSuccess: () => {
-      toast({ title: 'Cleared' });
+      toast({ title: "Cleared" });
       refetch();
     },
-    onError: (err: any) => toast({ variant: 'destructive', title: 'Clear failed', description: err.message }),
+    onError: (error: Error) =>
+      toast({
+        variant: "destructive",
+        title: "Clear failed",
+        description: error.message,
+      }),
   });
 
   return (
-    <div className="p-6">
-      <h2 className="text-xl font-semibold mb-4">Webhook Events</h2>
-
-      <div className="mb-4 flex gap-2">
-        <input placeholder="Filter by instanceId" value={selectedInstance || ''} onChange={(e) => setSelectedInstance(e.target.value || undefined)} className="border p-2 rounded" />
-        <Button onClick={() => refetch()}>Refresh</Button>
-  <Button variant="destructive" onClick={() => deleteBulk.mutate()} disabled={deleteBulk.isPending}>Clear</Button>
+    <div className="p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-semibold">Webhook Events</h2>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => refetch()} disabled={isFetching}>
+            {isFetching ? "Refreshing..." : "Refresh"}
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={() => deleteBulk.mutate()}
+            disabled={deleteBulk.isPending}
+          >
+            {deleteBulk.isPending ? "Clearing..." : "Clear all"}
+          </Button>
+        </div>
       </div>
 
-      <div className="space-y-3">
-  {(eventsData?.items || []).map((e: any) => (
-          <div key={e.id} className="border rounded p-3">
-            <div className="flex justify-between items-start">
-              <div>
-                <div className="text-sm text-muted-foreground">Instance: {e.instanceId || '—'}</div>
-                <div className="text-xs text-muted-foreground">{new Date(e.createdAt).toLocaleString()}</div>
-              </div>
-              <div className="flex gap-2">
-                <Button size="sm" onClick={() => navigator.clipboard.writeText(JSON.stringify(e))}>Copy</Button>
-                <Button size="sm" variant="destructive" onClick={() => deleteOne.mutate(e.id)}>Delete</Button>
-              </div>
-            </div>
-            <pre className="mt-2 text-xs max-h-48 overflow-auto bg-gray-50 p-2 rounded">{JSON.stringify(e, null, 2)}</pre>
-          </div>
-        ))}
-
-        {(!eventsData || eventsData.items.length === 0) && (
-          <div className="text-sm text-muted-foreground">No webhook events</div>
-        )}
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center gap-2 w-full md:w-80">
+          <Input
+            placeholder="Filter by webhook id (e.g. custom)"
+            value={webhookIdFilter}
+            onChange={(event) => setWebhookIdFilter(event.target.value)}
+          />
+          <Button
+            variant="outline"
+            onClick={() => setWebhookIdFilter("")}
+            disabled={!webhookIdFilter}
+          >
+            Reset
+          </Button>
+        </div>
+        <div className="text-xs text-muted-foreground">
+          Showing newest events first.
+        </div>
       </div>
+
+      <WebhookEventList
+        events={eventsData?.items}
+        isLoading={isLoading || isFetching}
+        emptyMessage="No webhook events found."
+        onDelete={deleteOne.mutate}
+        isDeletingId={deleteOne.isPending ? (deleteOne.variables as string) ?? null : null}
+      />
     </div>
   );
 }

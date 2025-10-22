@@ -1,27 +1,81 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { User } from "@shared/schema";
+import { Link } from "wouter";
+import { type User } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { UserPlus, Users, Lock, User as UserIcon, Pencil, Trash2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  ArrowLeft,
+  Pencil,
+  Plus,
+  Shield,
+  Trash2,
+  User as UserIcon,
+  Users,
+  Lock,
+} from "lucide-react";
+
+interface CreateUserForm {
+  username: string;
+  password: string;
+  role: "user" | "admin";
+}
 
 export default function UserManagement() {
   const { toast } = useToast();
   const { user: currentUser } = useAuth();
-  const [formData, setFormData] = useState({
+
+  const [search, setSearch] = useState("");
+  const [formData, setFormData] = useState<CreateUserForm>({
     username: "",
     password: "",
-    role: "user" as "user" | "admin",
+    role: "user",
   });
 
   const [editingUser, setEditingUser] = useState<Omit<User, "password"> | null>(null);
@@ -32,36 +86,61 @@ export default function UserManagement() {
 
   const [deletingUser, setDeletingUser] = useState<Omit<User, "password"> | null>(null);
 
-  const { data: users = [], isLoading } = useQuery<Omit<User, "password">[]>({
+  const {
+    data: users = [],
+    isLoading,
+  } = useQuery<Omit<User, "password">[]>({
     queryKey: ["/api/admin/users"],
   });
 
+  const filteredUsers = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return users;
+    return users.filter((user) =>
+      user.username.toLowerCase().includes(query) ||
+      user.role.toLowerCase().includes(query),
+    );
+  }, [users, search]);
+
+  const stats = useMemo(() => {
+    const total = users.length;
+    const admins = users.filter((user) => user.role === "admin").length;
+    const regular = total - admins;
+    return { total, admins, regular };
+  }, [users]);
+
   const createUserMutation = useMutation({
-    mutationFn: async (userData: typeof formData) => {
-      const res = await apiRequest("POST", "/api/admin/users", userData);
-      return await res.json();
+    mutationFn: async (payload: CreateUserForm) => {
+      const res = await apiRequest("POST", "/api/admin/users", payload);
+      return res.json();
     },
-    onSuccess: (newUser: Omit<User, "password">) => {
+    onSuccess: (createdUser: Omit<User, "password">) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
       setFormData({ username: "", password: "", role: "user" });
       toast({
         title: "User created",
-        description: `User "${newUser.username}" has been created successfully`,
+        description: `User "${createdUser.username}" has been created successfully`,
       });
     },
     onError: (error: Error) => {
       toast({
+        variant: "destructive",
         title: "Failed to create user",
         description: error.message,
-        variant: "destructive",
       });
     },
   });
 
   const updateUserMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: { username: string; role: string } }) => {
+    mutationFn: async ({
+      id,
+      data,
+    }: {
+      id: string;
+      data: { username: string; role: string };
+    }) => {
       const res = await apiRequest("PUT", `/api/admin/users/${id}`, data);
-      return await res.json();
+      return res.json();
     },
     onSuccess: (updatedUser: Omit<User, "password">) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
@@ -73,9 +152,9 @@ export default function UserManagement() {
     },
     onError: (error: Error) => {
       toast({
+        variant: "destructive",
         title: "Failed to update user",
         description: error.message,
-        variant: "destructive",
       });
     },
   });
@@ -94,264 +173,291 @@ export default function UserManagement() {
     },
     onError: (error: Error) => {
       toast({
+        variant: "destructive",
         title: "Failed to delete user",
         description: error.message,
-        variant: "destructive",
       });
     },
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCreateSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     createUserMutation.mutate(formData);
   };
 
-  const handleEdit = (user: Omit<User, "password">) => {
-    setEditingUser(user);
-    setEditFormData({
-      username: user.username,
-      role: user.role as "user" | "admin",
+  const handleEditSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editingUser) return;
+
+    updateUserMutation.mutate({
+      id: editingUser.id,
+      data: editFormData,
     });
   };
 
-  const handleEditSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (editingUser) {
-      updateUserMutation.mutate({
-        id: editingUser.id,
-        data: editFormData,
-      });
-    }
-  };
-
-  const handleDelete = (user: Omit<User, "password">) => {
-    setDeletingUser(user);
-  };
-
-  const confirmDelete = () => {
-    if (deletingUser) {
-      deleteUserMutation.mutate(deletingUser.id);
-    }
-  };
-
   return (
-    <div className="container mx-auto p-6 max-w-6xl space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
-          <Users className="h-5 w-5 text-primary" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold">User Management</h1>
-          <p className="text-sm text-muted-foreground">Create and manage user accounts</p>
-        </div>
-      </div>
-
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <UserPlus className="h-5 w-5" />
-              Create New User
-            </CardTitle>
-            <CardDescription>
-              Add a new user account to the system
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="username">Username</Label>
-                <div className="relative">
-                  <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="username"
-                    type="text"
-                    placeholder="Enter username"
-                    value={formData.username}
-                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                    className="pl-10"
-                    minLength={3}
-                    maxLength={50}
-                    required
-                    data-testid="input-create-username"
-                  />
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  3-50 characters
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="password"
-                    type="password"
-                    placeholder="Enter password"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="pl-10"
-                    minLength={6}
-                    required
-                    data-testid="input-create-password"
-                  />
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Minimum 6 characters
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="role">Role</Label>
-                <Select
-                  value={formData.role}
-                  onValueChange={(value: "user" | "admin") => setFormData({ ...formData, role: value })}
-                >
-                  <SelectTrigger id="role" data-testid="select-create-role">
-                    <SelectValue placeholder="Select role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="user" data-testid="option-role-user">User</SelectItem>
-                    <SelectItem value="admin" data-testid="option-role-admin">Admin</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Admin users can create and manage other users
-                </p>
-              </div>
-
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={createUserMutation.isPending}
-                data-testid="button-create-user"
-              >
-                {createUserMutation.isPending ? "Creating..." : "Create User"}
+    <div className="min-h-screen bg-background">
+      <div className="container mx-auto max-w-6xl space-y-6 p-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-3">
+            <Link href="/">
+              <Button variant="ghost" size="icon" data-testid="button-back-home">
+                <ArrowLeft className="h-5 w-5" />
               </Button>
-            </form>
-          </CardContent>
-        </Card>
+            </Link>
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
+              <Users className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold">User management</h1>
+              <p className="text-sm text-muted-foreground">
+                Invite teammates, promote admins, and revoke access.
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2 text-xs sm:text-sm">
+            <Badge variant="secondary" className="gap-1 px-3 py-1">
+              <Users className="h-3.5 w-3.5" />
+              {stats.total} total
+            </Badge>
+            <Badge variant="outline" className="gap-1 px-3 py-1">
+              <Shield className="h-3.5 w-3.5" />
+              {stats.admins} admins
+            </Badge>
+            <Badge variant="outline" className="gap-1 px-3 py-1">
+              <UserIcon className="h-3.5 w-3.5" />
+              {stats.regular} users
+            </Badge>
+          </div>
+        </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5" />
-              User List
-            </CardTitle>
-            <CardDescription>
-              {users.length} {users.length === 1 ? "user" : "users"} in the system
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="text-center py-8 text-muted-foreground">
-                Loading users...
+        <div className="grid gap-6 xl:grid-cols-[2fr,1fr]">
+          <Card className="overflow-hidden">
+            <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <CardTitle>Team directory</CardTitle>
+                <CardDescription>Search, edit, or remove existing accounts.</CardDescription>
               </div>
-            ) : users.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                No users found
+              <div className="w-full max-w-xs">
+                <Label htmlFor="search" className="sr-only">
+                  Search users
+                </Label>
+                <Input
+                  id="search"
+                  placeholder="Search by username or role"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
               </div>
-            ) : (
-              <div className="border rounded-md">
+            </CardHeader>
+            <CardContent className="p-0">
+              <ScrollArea className="h-[460px]">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Username</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                      <TableHead className="hidden md:table-cell">Role</TableHead>
+                      <TableHead className="hidden md:table-cell">Created</TableHead>
+                      <TableHead className="w-[120px] text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {users.map((user) => (
-                      <TableRow key={user.id} data-testid={`row-user-${user.id}`}>
-                        <TableCell className="font-medium" data-testid={`text-username-${user.id}`}>
-                          {user.username}
+                    {isLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center text-muted-foreground">
+                          Loading users...
                         </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={user.role === "admin" ? "default" : "secondary"}
-                            data-testid={`badge-role-${user.id}`}
-                          >
-                            {user.role}
-                          </Badge>
+                      </TableRow>
+                    ) : filteredUsers.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center text-muted-foreground">
+                          No users found.
                         </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
+                      </TableRow>
+                    ) : (
+                      filteredUsers.map((user) => (
+                        <TableRow key={user.id} data-testid={`row-user-${user.id}`}>
+                          <TableCell className="font-medium capitalize">
+                            {user.username}
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell">
+                            <Badge
+                              variant={user.role === "admin" ? "default" : "secondary"}
+                              className="capitalize"
+                            >
+                              {user.role}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell text-muted-foreground">
+                            {new Date(user.createdAt ?? "").toLocaleString()}
+                          </TableCell>
+                          <TableCell className="flex justify-end gap-2">
                             <Button
-                              variant="ghost"
                               size="icon"
-                              onClick={() => handleEdit(user)}
+                              variant="ghost"
                               data-testid={`button-edit-${user.id}`}
+                              onClick={() => {
+                                setEditingUser(user);
+                                setEditFormData({
+                                  username: user.username,
+                                  role: user.role as "user" | "admin",
+                                });
+                              }}
+                              aria-label={`Edit ${user.username}`}
                             >
                               <Pencil className="h-4 w-4" />
                             </Button>
                             <Button
-                              variant="ghost"
                               size="icon"
-                              onClick={() => handleDelete(user)}
-                              disabled={currentUser?.id === user.id}
+                              variant="ghost"
                               data-testid={`button-delete-${user.id}`}
+                              onClick={() => setDeletingUser(user)}
+                              disabled={currentUser?.id === user.id}
+                              aria-label={`Delete ${user.username}`}
+                              className={currentUser?.id === user.id ? "text-muted-foreground" : "text-destructive"}
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
                   </TableBody>
                 </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Plus className="h-4 w-4" />
+                Invite new teammate
+              </CardTitle>
+              <CardDescription>
+                Create an account and choose their role.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleCreateSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="username">Username</Label>
+                  <div className="relative">
+                    <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="username"
+                      autoComplete="off"
+                      minLength={3}
+                      maxLength={50}
+                      placeholder="jane.doe"
+                      value={formData.username}
+                      onChange={(event) => setFormData({
+                        ...formData,
+                        username: event.target.value,
+                      })}
+                      className="pl-10"
+                      required
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">Between 3 and 50 characters.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="password">Temporary password</Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="password"
+                      type="password"
+                      minLength={6}
+                      placeholder="••••••••"
+                      value={formData.password}
+                      onChange={(event) => setFormData({
+                        ...formData,
+                        password: event.target.value,
+                      })}
+                      className="pl-10"
+                      required
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">Minimum 6 characters.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="role">Role</Label>
+                  <Select
+                    value={formData.role}
+                    onValueChange={(value: "user" | "admin") =>
+                      setFormData({ ...formData, role: value })
+                    }
+                  >
+                    <SelectTrigger id="role">
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="user">Standard user</SelectItem>
+                      <SelectItem value="admin">Administrator</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={createUserMutation.isPending}
+                >
+                  {createUserMutation.isPending ? "Creating..." : "Create account"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
+      {/* Edit user dialog */}
       <Dialog open={!!editingUser} onOpenChange={(open) => !open && setEditingUser(null)}>
         <DialogContent data-testid="dialog-edit-user">
-          <DialogHeader>
-            <DialogTitle>Edit User</DialogTitle>
-            <DialogDescription>
-              Update user information. Password cannot be changed here.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleEditSubmit}>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-username">Username</Label>
-                <div className="relative">
-                  <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="edit-username"
-                    type="text"
-                    placeholder="Enter username"
-                    value={editFormData.username}
-                    onChange={(e) => setEditFormData({ ...editFormData, username: e.target.value })}
-                    className="pl-10"
-                    minLength={3}
-                    maxLength={50}
-                    required
-                    data-testid="input-edit-username"
-                  />
-                </div>
-              </div>
+          <form onSubmit={handleEditSubmit} className="space-y-4">
+            <DialogHeader>
+              <DialogTitle>Edit user</DialogTitle>
+              <DialogDescription>
+                Update username or role. Password changes are not supported from here.
+              </DialogDescription>
+            </DialogHeader>
 
-              <div className="space-y-2">
-                <Label htmlFor="edit-role">Role</Label>
-                <Select
-                  value={editFormData.role}
-                  onValueChange={(value: "user" | "admin") => setEditFormData({ ...editFormData, role: value })}
-                >
-                  <SelectTrigger id="edit-role" data-testid="select-edit-role">
-                    <SelectValue placeholder="Select role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="user">User</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-username">Username</Label>
+              <Input
+                id="edit-username"
+                value={editFormData.username}
+                onChange={(event) =>
+                  setEditFormData({ ...editFormData, username: event.target.value })
+                }
+                minLength={3}
+                maxLength={50}
+                required
+                data-testid="input-edit-username"
+              />
             </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-role">Role</Label>
+              <Select
+                value={editFormData.role}
+                onValueChange={(value: "user" | "admin") =>
+                  setEditFormData({ ...editFormData, role: value })
+                }
+              >
+                <SelectTrigger id="edit-role">
+                  <SelectValue placeholder="Select role" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="user">Standard user</SelectItem>
+                  <SelectItem value="admin">Administrator</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             <DialogFooter>
               <Button
                 type="button"
@@ -361,32 +467,28 @@ export default function UserManagement() {
               >
                 Cancel
               </Button>
-              <Button
-                type="submit"
-                disabled={updateUserMutation.isPending}
-                data-testid="button-edit-save"
-              >
-                {updateUserMutation.isPending ? "Saving..." : "Save Changes"}
+              <Button type="submit" disabled={updateUserMutation.isPending} data-testid="button-edit-save">
+                {updateUserMutation.isPending ? "Saving..." : "Save changes"}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
+      {/* Delete confirmation */}
       <AlertDialog open={!!deletingUser} onOpenChange={(open) => !open && setDeletingUser(null)}>
-        <AlertDialogContent data-testid="dialog-delete-confirm">
+        <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogTitle>Delete user?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete the user "{deletingUser?.username}". This action cannot be undone.
+              This action cannot be undone. The user will be removed permanently.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel data-testid="button-delete-cancel">Cancel</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={confirmDelete}
+              onClick={() => deletingUser && deleteUserMutation.mutate(deletingUser.id)}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              data-testid="button-delete-confirm"
             >
               {deleteUserMutation.isPending ? "Deleting..." : "Delete"}
             </AlertDialogAction>

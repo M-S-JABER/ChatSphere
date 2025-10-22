@@ -14,8 +14,6 @@ import NotFound from "@/pages/not-found";
 import Webhooks from "@/pages/Webhooks";
 import WebhookEvents from "@/pages/Admin/WebhookEvents";
 import DataEditor from "@/pages/Admin/DataEditor";
-import WebhookDiagnostics from "@/pages/WebhookDiagnostics";
-import ApiPlayground from "@/pages/Admin/ApiPlayground";
 
 function Router() {
   return (
@@ -26,9 +24,7 @@ function Router() {
         <ProtectedRoute path="/webhooks" component={Webhooks} />
     <ProtectedRoute path="/admin/webhooks" component={WebhookEvents} />
     <ProtectedRoute path="/admin/data-editor" component={DataEditor} />
-    <ProtectedRoute path="/admin/api-playground" component={ApiPlayground} />
       <ProtectedRoute path="/users" component={UserManagement} />
-      <ProtectedRoute path="/diagnostics" component={WebhookDiagnostics} />
       <Route path="/auth" component={AuthPage} />
       <Route component={NotFound} />
     </Switch>

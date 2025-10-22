@@ -9,6 +9,7 @@ import { formatDistanceToNow } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { NewConversationDialog } from "@/components/NewConversationDialog";
 
 interface ConversationListProps {
   conversations: Conversation[];
@@ -18,6 +19,7 @@ interface ConversationListProps {
   showArchived?: boolean;
   onToggleArchived?: () => void;
   onArchive?: (id: string, archived: boolean) => void;
+  onCreateConversation?: (payload: { phone: string; body?: string }) => void;
 }
 
 export function ConversationList({ 
@@ -28,6 +30,7 @@ export function ConversationList({
   showArchived = false,
   onToggleArchived,
   onArchive,
+  onCreateConversation,
 }: ConversationListProps) {
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -91,30 +94,38 @@ export function ConversationList({
 
   return (
     <div className="flex flex-col h-screen border-r border-border bg-card">
-      <div className="p-4 border-b border-border">
-        <div className="flex items-center justify-between">
+      <div className="p-4 border-b border-border space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-xl font-medium text-foreground">Messages</h1>
-          {onToggleArchived && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onToggleArchived}
-              className="gap-2"
-              data-testid="button-toggle-archived"
-            >
-              {showArchived ? (
-                <>
-                  <ArchiveRestore className="h-4 w-4" />
-                  <span className="text-sm">Active</span>
-                </>
-              ) : (
-                <>
-                  <Archive className="h-4 w-4" />
-                  <span className="text-sm">Archived</span>
-                </>
-              )}
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {onCreateConversation && (
+              <NewConversationDialog
+                onCreateConversation={onCreateConversation}
+                triggerClassName="h-9 px-3"
+              />
+            )}
+            {onToggleArchived && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onToggleArchived}
+                className="gap-2"
+                data-testid="button-toggle-archived"
+              >
+                {showArchived ? (
+                  <>
+                    <ArchiveRestore className="h-4 w-4" />
+                    <span className="text-sm">Active</span>
+                  </>
+                ) : (
+                  <>
+                    <Archive className="h-4 w-4" />
+                    <span className="text-sm">Archived</span>
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
         </div>
         {showArchived && (
           <div className="mt-2">
