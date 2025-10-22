@@ -81,4 +81,4 @@ Preferred communication style: Simple, everyday language.
 - `recharts` for data visualization in the statistics dashboard.
 
 **Development Tools:**
-- `vite-plugin-runtime-error-modal`, `cartographer`, `dev-banner` (Replit-specific), `tsx`, `esbuild`.
+- `vite-plugin-runtime-error-modal`, `cartographer`, `dev-banner` (MUSTAFA JABER), `tsx`, `esbuild`.
