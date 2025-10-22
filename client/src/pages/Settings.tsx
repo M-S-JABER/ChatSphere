@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Textarea } from "@/components/ui/textarea";
 import { apiRequest } from "@/lib/queryClient";
 
 type WebhookBehaviorOption = "auto" | "accept" | "reject";
@@ -37,6 +38,53 @@ interface DefaultInstanceResponse {
   instance: DefaultInstance | null;
 }
 
+type WebhookMethod = "GET" | "POST";
+
+interface WebhookResponseConfig {
+  status: number;
+  body: string;
+}
+
+interface WebhookUrlConfig {
+  method: WebhookMethod;
+  path: string;
+  response: WebhookResponseConfig;
+}
+
+const DEFAULT_WEBHOOK_CONFIG: WebhookUrlConfig[] = [
+  {
+    method: "GET",
+    path: "/webhook/meta",
+    response: {
+      status: 200,
+      body: "{{query.hub.challenge}}",
+    },
+  },
+  {
+    method: "POST",
+    path: "/webhook/custom",
+    response: {
+      status: 200,
+      body: "{{json body}}",
+    },
+  },
+];
+
+const cloneWebhookConfigs = (configs: WebhookUrlConfig[]): WebhookUrlConfig[] =>
+  configs.map((cfg) => ({
+    method: cfg.method === "POST" ? "POST" : "GET",
+    path: cfg.path?.trim() || (cfg.method === "GET" ? "/webhook/meta" : "/webhook/custom"),
+    response: {
+      status:
+        typeof cfg.response?.status === "number" && Number.isFinite(cfg.response.status)
+          ? cfg.response.status
+          : cfg.method === "GET"
+          ? 200
+          : 200,
+      body: typeof cfg.response?.body === "string" ? cfg.response.body : "",
+    },
+  }));
+
 export default function Settings() {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -54,6 +102,9 @@ export default function Settings() {
   const [appSecretInput, setAppSecretInput] = useState("");
   const [appSecretDirty, setAppSecretDirty] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [webhookConfigs, setWebhookConfigs] = useState<WebhookUrlConfig[]>(
+    cloneWebhookConfigs(DEFAULT_WEBHOOK_CONFIG),
+  );
 
   const populateInstanceForm = useCallback((data: DefaultInstance | null | undefined) => {
     if (data) {
@@ -87,12 +138,34 @@ export default function Settings() {
     retry: false,
   });
 
+  const { data: customWebhookData, isLoading: isWebhookConfigLoading } = useQuery<WebhookUrlConfig[]>({
+    queryKey: ['/api/admin/custom-webhook'],
+    queryFn: async () => {
+      const res = await fetch('/api/admin/custom-webhook', { credentials: 'include' });
+      if (!res.ok) throw new Error(await res.text());
+      const payload = await res.json();
+      return Array.isArray(payload.config)
+        ? cloneWebhookConfigs(payload.config)
+        : cloneWebhookConfigs(DEFAULT_WEBHOOK_CONFIG);
+    },
+    retry: false,
+  });
+
   const instance = defaultInstanceData?.instance ?? null;
 
   useEffect(() => {
     if (defaultInstanceData === undefined) return;
     populateInstanceForm(defaultInstanceData.instance);
   }, [defaultInstanceData, populateInstanceForm]);
+
+  useEffect(() => {
+    if (!customWebhookData) return;
+    setWebhookConfigs(
+      customWebhookData.length > 0
+        ? cloneWebhookConfigs(customWebhookData)
+        : cloneWebhookConfigs(DEFAULT_WEBHOOK_CONFIG),
+    );
+  }, [customWebhookData]);
 
   const updateInstanceMutation = useMutation({
     mutationFn: async (payload: Record<string, any>) => {
@@ -110,6 +183,32 @@ export default function Settings() {
       toast({
         variant: "destructive",
         title: "Failed to update instance",
+        description: error.message,
+      });
+    },
+  });
+
+  const updateWebhookConfigMutation = useMutation({
+    mutationFn: async (payload: WebhookUrlConfig[]) => {
+      const res = await apiRequest("PUT", "/api/admin/custom-webhook", payload);
+      const data = await res.json();
+      const configs = Array.isArray(data.config)
+        ? cloneWebhookConfigs(data.config)
+        : cloneWebhookConfigs(DEFAULT_WEBHOOK_CONFIG);
+      return configs;
+    },
+    onSuccess: (configs) => {
+      setWebhookConfigs(configs);
+      queryClient.setQueryData<WebhookUrlConfig[]>(['/api/admin/custom-webhook'], configs);
+      toast({
+        title: "Webhook configuration updated",
+        description: "Custom webhook responses saved successfully.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Failed to update webhook configuration",
         description: error.message,
       });
     },
@@ -164,15 +263,23 @@ export default function Settings() {
     populateInstanceForm(defaultInstanceData.instance);
   };
 
-  const { data: apiControls } = useQuery({
-    queryKey: ['/api/admin/api-controls'],
-    queryFn: async () => {
-      const res = await fetch('/api/admin/api-controls', { credentials: 'include' });
-      if (!res.ok) throw new Error(await res.text());
-      return res.json();
-    },
-    retry: false,
-  });
+  const handleWebhookConfigSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const payload = webhookConfigs.map((cfg, index) => ({
+      method: cfg.method,
+      path: cfg.path?.trim() || (cfg.method === "GET" ? "/webhook/meta" : "/webhook/custom"),
+      response: {
+        status: Number.isFinite(cfg.response.status) ? cfg.response.status : index === 0 ? 200 : 200,
+        body: cfg.response.body,
+      },
+    }));
+
+    updateWebhookConfigMutation.mutate(payload);
+  };
+
+  const handleWebhookReset = () => {
+    setWebhookConfigs(cloneWebhookConfigs(DEFAULT_WEBHOOK_CONFIG));
+  };
 
   // Redirect non-admin users to home page
   useEffect(() => {
@@ -438,65 +545,146 @@ export default function Settings() {
             </CardContent>
           </Card>
 
-          {/* Webhook Configuration */}
+          {/* Webhook URLs */}
           <Card>
             <CardHeader>
-              <CardTitle>Webhook Configuration</CardTitle>
+              <CardTitle>Webhook URLs</CardTitle>
               <CardDescription>
-                Configure your webhook URL in Meta Developer Console
+                Configure the HTTP paths and canned responses used by your webhook endpoints.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <label className="text-sm font-medium">Webhook URL</label>
-                <div className="flex items-center gap-2 mt-1">
-                  <code className="flex-1 p-2 bg-muted rounded text-sm">
-                    {typeof window !== 'undefined' ? `${window.location.origin}/webhook/meta` : '/webhook/meta'}
-                  </code>
+            <CardContent className="space-y-6">
+              <form onSubmit={handleWebhookConfigSubmit} className="space-y-6">
+                <div className="space-y-4">
+                  {isWebhookConfigLoading ? (
+                    <div className="text-sm text-muted-foreground">Loading webhook URLs…</div>
+                  ) : (
+                    webhookConfigs.map((cfg, index) => (
+                      <div key={`${cfg.method}-${index}`} className="space-y-4 rounded border p-4">
+                        <div className="grid gap-3 md:grid-cols-[160px,1fr] md:items-center">
+                          <div className="space-y-1">
+                            <Label>HTTP Method</Label>
+                            <Select
+                              value={cfg.method}
+                              onValueChange={(value: WebhookMethod) =>
+                                setWebhookConfigs((prev) => {
+                                  const next = [...prev];
+                                  next[index] = { ...next[index], method: value };
+                                  return next;
+                                })
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select method" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="GET">GET</SelectItem>
+                                <SelectItem value="POST">POST</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label>Path</Label>
+                            <Input
+                              value={cfg.path}
+                              onChange={(event) =>
+                                setWebhookConfigs((prev) => {
+                                  const next = [...prev];
+                                  next[index] = { ...next[index], path: event.target.value };
+                                  return next;
+                                })
+                              }
+                              placeholder="/webhook/custom"
+                              required
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div>
+                            <Label className="text-sm">Respond to Webhook</Label>
+                            <p className="text-xs text-muted-foreground">
+                              Configure the fixed response returned to the caller after your server processes the request.
+                            </p>
+                          </div>
+
+                          <div className="grid gap-3 md:grid-cols-[160px,1fr] md:items-start">
+                            <div className="space-y-1">
+                              <Label>Response Code</Label>
+                              <Input
+                                type="number"
+                                min={100}
+                                max={599}
+                                value={cfg.response.status}
+                                onChange={(event) =>
+                                  setWebhookConfigs((prev) => {
+                                    const next = [...prev];
+                                    const status = Number(event.target.value);
+                                    next[index] = {
+                                      ...next[index],
+                                      response: {
+                                        ...next[index].response,
+                                        status: Number.isFinite(status)
+                                          ? status
+                                          : next[index].response.status,
+                                      },
+                                    };
+                                    return next;
+                                  })
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Response Body</Label>
+                              <Textarea
+                                value={cfg.response.body}
+                                onChange={(event) =>
+                                  setWebhookConfigs((prev) => {
+                                    const next = [...prev];
+                                    next[index] = {
+                                      ...next[index],
+                                      response: {
+                                        ...next[index].response,
+                                        body: event.target.value,
+                                      },
+                                    };
+                                    return next;
+                                  })
+                                }
+                                className="min-h-[140px]"
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                Use helpers like <code>{"{{query.hub.challenge}}"}</code> or <code>{"{{json body}}"}</code> to inject request data into the reply.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
                   <Button
+                    type="button"
                     variant="outline"
-                    size="sm"
-                    onClick={() => copyToClipboard(
-                      typeof window !== 'undefined' ? `${window.location.origin}/webhook/meta` : '/webhook/meta'
-                    )}
+                    onClick={handleWebhookReset}
+                    disabled={updateWebhookConfigMutation.isPending}
                   >
-                    <Copy className="h-4 w-4" />
+                    Reset to defaults
+                  </Button>
+                  <Button type="submit" disabled={updateWebhookConfigMutation.isPending}>
+                    {updateWebhookConfigMutation.isPending ? "Saving..." : "Save webhook URLs"}
                   </Button>
                 </div>
-              </div>
-              <div>
-                <label className="text-sm font-medium">Verify Token</label>
-                <p className="text-sm text-muted-foreground">
-                  Use the same verify token you configured for the default instance above.
-                </p>
-              </div>
+              </form>
+
+              <p className="text-xs text-muted-foreground">
+                Tip: append secret query parameters (for example <code>{"?token=xxxx"}</code>) and validate them inside your response template.
+              </p>
             </CardContent>
           </Card>
 
-          {/* API Controls */}
-          {apiControls && (
-            <Card>
-              <CardHeader>
-                <CardTitle>API Controls</CardTitle>
-                <CardDescription>
-                  Control API access and features
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <label className="text-sm font-medium">Test Webhook Enabled</label>
-                    <p className="text-sm text-muted-foreground">
-                      Allow testing webhook endpoints
-                    </p>
-                  </div>
-                  <Badge variant={apiControls.testWebhookEnabled ? "default" : "secondary"}>
-                    {apiControls.testWebhookEnabled ? "Enabled" : "Disabled"}
-                  </Badge>
-                </div>
-              </CardContent>
-            </Card>
-          )}
         </div>
       </div>
     </div>

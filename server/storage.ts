@@ -35,19 +35,17 @@ export type WhatsappInstanceConfig = {
   source?: "custom" | "env";
 };
 
-export type CustomWebhookResponseConfig = {
-  get: {
-    enabled: boolean;
+export type CustomWebhookRouteConfig = {
+  method: "GET" | "POST";
+  path: string;
+  response: {
     status: number;
-    contentType: string;
     body: string;
   };
-  post: {
-    enabled: boolean;
-    status: number;
-    contentType: string;
-    body: string;
-  };
+};
+
+export type CustomWebhookSettings = {
+  routes: CustomWebhookRouteConfig[];
   updatedAt?: string;
 };
 
@@ -85,8 +83,8 @@ export interface IStorage {
   getDefaultWhatsappInstance(): Promise<WhatsappInstanceConfig | null>;
   setDefaultWhatsappInstance(config: WhatsappInstanceConfig): Promise<void>;
   clearDefaultWhatsappInstance(): Promise<void>;
-  getCustomWebhookResponse(): Promise<CustomWebhookResponseConfig>;
-  setCustomWebhookResponse(config: CustomWebhookResponseConfig): Promise<void>;
+  getCustomWebhookResponse(): Promise<CustomWebhookSettings>;
+  setCustomWebhookResponse(routes: CustomWebhookRouteConfig[]): Promise<void>;
   
   sessionStore: session.Store;
 }
@@ -466,48 +464,83 @@ export class DatabaseStorage implements IStorage {
     await db.delete(appSettings).where(eq(appSettings.key, "defaultWhatsappInstance"));
   }
 
-  private defaultCustomWebhookResponse(): CustomWebhookResponseConfig {
+  private defaultCustomWebhookResponse(): CustomWebhookSettings {
     return {
-      get: {
-        enabled: true,
-        status: 200,
-        contentType: "text/plain",
-        body: "{{query.hub.challenge}}",
-      },
-      post: {
-        enabled: true,
-        status: 200,
-        contentType: "application/json",
-        body: "{{json body}}",
+      routes: [
+        {
+          method: "GET",
+          path: "/webhook/meta",
+          response: {
+            status: 200,
+            body: "{{query.hub.challenge}}",
+          },
+        },
+        {
+          method: "POST",
+          path: "/webhook/custom",
+          response: {
+            status: 200,
+            body: "{{json body}}",
+          },
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  private sanitizeRoute(route: any, fallback: CustomWebhookRouteConfig): CustomWebhookRouteConfig {
+    const method = route?.method === "POST" ? "POST" : "GET";
+    const path = typeof route?.path === "string" && route.path.trim().length > 0
+      ? route.path.trim()
+      : fallback.path;
+    const status = typeof route?.response?.status === "number"
+      ? route.response.status
+      : fallback.response.status;
+    const body = typeof route?.response?.body === "string"
+      ? route.response.body
+      : fallback.response.body;
+
+    return {
+      method,
+      path,
+      response: {
+        status,
+        body,
       },
     };
   }
 
-  async getCustomWebhookResponse(): Promise<CustomWebhookResponseConfig> {
+  async getCustomWebhookResponse(): Promise<CustomWebhookSettings> {
     const stored = await this.getAppSetting("customWebhookResponse");
-    if (!stored) {
-      return this.defaultCustomWebhookResponse();
+    const defaults = this.defaultCustomWebhookResponse();
+
+    if (!stored || !Array.isArray(stored.routes)) {
+      return defaults;
     }
+
+    const routes = stored.routes.map((route: any) => {
+      const fallback = defaults.routes.find((r) => r.method === route?.method) || defaults.routes[0];
+      return this.sanitizeRoute(route, fallback);
+    });
+
     return {
-      ...this.defaultCustomWebhookResponse(),
-      ...stored,
+      routes: routes.length > 0 ? routes : defaults.routes,
+      updatedAt: stored.updatedAt || defaults.updatedAt,
     };
   }
 
-  async setCustomWebhookResponse(config: CustomWebhookResponseConfig): Promise<void> {
-    const payload: CustomWebhookResponseConfig = {
-      get: {
-        enabled: config.get?.enabled ?? true,
-        status: typeof config.get?.status === "number" ? config.get.status : 200,
-        contentType: config.get?.contentType || "text/plain",
-        body: typeof config.get?.body === "string" ? config.get.body : "{{query.hub.challenge}}",
-      },
-      post: {
-        enabled: config.post?.enabled ?? true,
-        status: typeof config.post?.status === "number" ? config.post.status : 200,
-        contentType: config.post?.contentType || "application/json",
-        body: typeof config.post?.body === "string" ? config.post.body : "{{json body}}",
-      },
+  async setCustomWebhookResponse(routes: CustomWebhookRouteConfig[]): Promise<void> {
+    const defaults = this.defaultCustomWebhookResponse();
+    const sanitized = (routes || []).map((route, index) => {
+      const fallback =
+        defaults.routes.find((r) => r.method === route?.method) ||
+        defaults.routes[index] ||
+        defaults.routes[0];
+      return this.sanitizeRoute(route, fallback);
+    });
+
+    const payload: CustomWebhookSettings = {
+      routes: sanitized.length > 0 ? sanitized : defaults.routes,
       updatedAt: new Date().toISOString(),
     };
 

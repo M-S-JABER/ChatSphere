@@ -11,8 +11,6 @@ import Statistics from "@/pages/Statistics";
 import UserManagement from "@/pages/UserManagement";
 import AuthPage from "@/pages/AuthPage";
 import NotFound from "@/pages/not-found";
-import Webhooks from "@/pages/Webhooks";
-import WebhookEvents from "@/pages/Admin/WebhookEvents";
 import DataEditor from "@/pages/Admin/DataEditor";
 
 function Router() {
@@ -21,9 +19,7 @@ function Router() {
       <ProtectedRoute path="/" component={Home} />
       <ProtectedRoute path="/settings" component={Settings} />
       <ProtectedRoute path="/statistics" component={Statistics} />
-        <ProtectedRoute path="/webhooks" component={Webhooks} />
-    <ProtectedRoute path="/admin/webhooks" component={WebhookEvents} />
-    <ProtectedRoute path="/admin/data-editor" component={DataEditor} />
+      <ProtectedRoute path="/admin/data-editor" component={DataEditor} />
       <ProtectedRoute path="/users" component={UserManagement} />
       <Route path="/auth" component={AuthPage} />
       <Route component={NotFound} />

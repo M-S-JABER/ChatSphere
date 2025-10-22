@@ -167,7 +167,7 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
   app.get('/api/admin/custom-webhook', requireAdmin, async (_req: Request, res: Response) => {
     try {
       const config = await storage.getCustomWebhookResponse();
-      res.json({ config });
+      res.json({ config: config.routes });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -175,10 +175,10 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
 
   app.put('/api/admin/custom-webhook', requireAdmin, async (req: Request, res: Response) => {
     try {
-      const config = req.body as any;
-      await storage.setCustomWebhookResponse(config);
+      const routes = Array.isArray(req.body) ? req.body : [];
+      await storage.setCustomWebhookResponse(routes);
       const updated = await storage.getCustomWebhookResponse();
-      res.json({ config: updated });
+      res.json({ config: updated.routes });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -627,12 +627,15 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
 
   app.get("/webhook/custom", async (req: Request, res: Response) => {
     try {
-      const config = await storage.getCustomWebhookResponse();
-      if (!config.get.enabled) {
-        return res.status(404).send("Custom GET webhook is disabled.");
-      }
+      const settings = await storage.getCustomWebhookResponse();
+      const route =
+        settings.routes.find((r) => r.method === "GET") ?? {
+          method: "GET",
+          path: "/webhook/meta",
+          response: { status: 200, body: "{{query.hub.challenge}}" },
+        };
 
-      const body = renderTemplate(config.get.body, {
+      const body = renderTemplate(route.response.body, {
         query: req.query as Record<string, any>,
         body: null,
         headers: req.headers as Record<string, any>,
@@ -640,13 +643,13 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
 
       try {
         await storage.logWebhookEvent({
-          webhookId: "custom",
           headers: req.headers,
           query: req.query,
           body: null,
           response: {
+            webhook: route.path,
             method: "GET",
-            status: config.get.status,
+            status: route.response.status,
             body,
           },
         });
@@ -654,7 +657,7 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
         console.error("Failed to log custom GET webhook event:", logError);
       }
 
-      res.status(config.get.status).type(config.get.contentType || "text/plain").send(body);
+      res.status(route.response.status).type("text/plain").send(body);
     } catch (error: any) {
       console.error("Custom webhook GET error:", error);
       res.status(500).send("Custom webhook error");
@@ -663,77 +666,48 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
 
   app.post("/webhook/custom", async (req: Request, res: Response) => {
     try {
-      const config = await storage.getCustomWebhookResponse();
-      if (!config.post.enabled) {
-        return res.status(404).json({ error: "Custom POST webhook is disabled." });
-      }
+      const settings = await storage.getCustomWebhookResponse();
+      const route =
+        settings.routes.find((r) => r.method === "POST") ?? {
+          method: "POST",
+          path: "/webhook/custom",
+          response: { status: 200, body: "{{json body}}" },
+        };
 
-      const body = renderTemplate(config.post.body, {
+      const templatedBody = renderTemplate(route.response.body, {
         query: req.query as Record<string, any>,
         body: req.body,
         headers: req.headers as Record<string, any>,
       });
 
-      if ((config.post.contentType || "").includes("application/json")) {
-        try {
-          const parsed = body ? JSON.parse(body) : {};
-
-          try {
-            await storage.logWebhookEvent({
-              webhookId: "custom",
-              headers: req.headers,
-              query: req.query,
-              body: req.body,
-              response: {
-                method: "POST",
-                status: config.post.status,
-                body: parsed,
-              },
-            });
-          } catch (logError) {
-            console.error("Failed to log custom POST webhook event:", logError);
-          }
-
-          return res.status(config.post.status).type(config.post.contentType).send(parsed);
-        } catch {
-          try {
-            await storage.logWebhookEvent({
-              webhookId: "custom",
-              headers: req.headers,
-              query: req.query,
-              body: req.body,
-              response: {
-                method: "POST",
-                status: config.post.status,
-                body,
-              },
-            });
-          } catch (logError) {
-            console.error("Failed to log custom POST webhook event:", logError);
-          }
-
-          res.status(config.post.status).type(config.post.contentType).send(body);
-          return;
-        }
+      let parsedBody: any = undefined;
+      try {
+        parsedBody = templatedBody ? JSON.parse(templatedBody) : {};
+      } catch {
+        parsedBody = undefined;
       }
 
       try {
         await storage.logWebhookEvent({
-          webhookId: "custom",
           headers: req.headers,
           query: req.query,
           body: req.body,
           response: {
+            webhook: route.path,
             method: "POST",
-            status: config.post.status,
-            body,
+            status: route.response.status,
+            body: parsedBody ?? templatedBody,
           },
         });
       } catch (logError) {
         console.error("Failed to log custom POST webhook event:", logError);
       }
 
-      res.status(config.post.status).type(config.post.contentType || "text/plain").send(body);
+      if (parsedBody !== undefined) {
+        return res.status(route.response.status).type("application/json").send(parsedBody);
+      }
+
+      res.status(route.response.status).type("text/plain").send(templatedBody);
     } catch (error: any) {
       console.error("Custom webhook POST error:", error);
       res.status(500).json({ error: "Custom webhook error" });
