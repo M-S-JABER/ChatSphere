@@ -1,0 +1,29 @@
+{
+    "sqltools.connections": [
+        {
+            "mysqlOptions": {
+                "authProtocol": "default",
+                "enableSsl": "Disabled"
+            },
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "172.16.21.101",
+            "port": 3307,
+            "driver": "MariaDB",
+            "name": "sql_nas",
+            "username": "root",
+            "database": "mysql"
+        },
+        {
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "10.255.255.254",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "whatsapp-db",
+            "database": "postgres",
+            "username": "postgres",
+            "password": "Ancir2025"
+        }
+    ]
+}
