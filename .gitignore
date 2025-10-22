@@ -9,3 +9,6 @@ vite.config.ts.*
 *.tar.gz.env
 uploads/
 >>>>>>> e069247 (Initial commit (without .env and uploads))
+
+
+/uploads
