@@ -12,6 +12,7 @@ import UserManagement from "@/pages/UserManagement";
 import AuthPage from "@/pages/AuthPage";
 import NotFound from "@/pages/not-found";
 import DataEditor from "@/pages/Admin/DataEditor";
+import WebhookOverview from "@/pages/WebhookOverview";
 
 function Router() {
   return (
@@ -20,6 +21,7 @@ function Router() {
       <ProtectedRoute path="/settings" component={Settings} />
       <ProtectedRoute path="/statistics" component={Statistics} />
       <ProtectedRoute path="/admin/data-editor" component={DataEditor} />
+      <ProtectedRoute path="/webhook-overview" component={WebhookOverview} />
       <ProtectedRoute path="/users" component={UserManagement} />
       <Route path="/auth" component={AuthPage} />
       <Route component={NotFound} />

@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Users, Settings, BarChart3 } from "lucide-react";
+import { LogOut, Users, Settings, BarChart3, BookOpen } from "lucide-react";
 
 export function UserMenu() {
   const { user, logoutMutation } = useAuth();
@@ -70,6 +70,13 @@ export function UserMenu() {
             >
               <Settings className="mr-2 h-4 w-4" />
               <span>Settings</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => setLocation("/webhook-overview")}
+              className="cursor-pointer"
+            >
+              <BookOpen className="mr-2 h-4 w-4" />
+              <span>Webhook Overview</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => setLocation("/users")}
