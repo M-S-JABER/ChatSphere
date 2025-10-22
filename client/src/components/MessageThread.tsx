@@ -2,7 +2,7 @@ import { type Conversation, type Message } from "@shared/schema";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MoreVertical, Upload } from "lucide-react";
+import { MoreVertical, Upload, Trash2 } from "lucide-react";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -17,6 +17,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
 interface MessageThreadProps {
@@ -29,6 +30,8 @@ interface MessageThreadProps {
   onDeleteMessage?: (messageId: string) => Promise<unknown>;
   deletingMessageId?: string | null;
   isDeletingMessage?: boolean;
+  onDeleteConversation?: () => Promise<void>;
+  isDeletingConversation?: boolean;
 }
 
 export function MessageThread({
@@ -41,12 +44,15 @@ export function MessageThread({
   onDeleteMessage,
   deletingMessageId,
   isDeletingMessage,
+  onDeleteConversation,
+  isDeletingConversation,
 }: MessageThreadProps) {
   const [isDragging, setIsDragging] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const [messagePendingDeletion, setMessagePendingDeletion] = useState<Message | null>(null);
+  const [deleteConversationOpen, setDeleteConversationOpen] = useState(false);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -218,6 +224,45 @@ export function MessageThread({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {onDeleteConversation && (
+              <AlertDialog open={deleteConversationOpen} onOpenChange={setDeleteConversationOpen}>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label="Delete conversation"
+                  >
+                    <Trash2 className="h-5 w-5" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete entire conversation?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will remove all messages in this conversation. This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={async () => {
+                        if (!onDeleteConversation) return;
+                        try {
+                          await onDeleteConversation();
+                          setDeleteConversationOpen(false);
+                        } catch (error) {
+                          console.error(error);
+                        }
+                      }}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      disabled={isDeletingConversation}
+                    >
+                      {isDeletingConversation ? "Deleting..." : "Delete"}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
             <Button size="icon" variant="ghost" data-testid="button-menu">
               <MoreVertical className="h-5 w-5" />
             </Button>

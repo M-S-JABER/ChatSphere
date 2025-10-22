@@ -60,6 +60,7 @@ export interface IStorage {
   getMessages(conversationId: string, page?: number, pageSize?: number): Promise<{ items: Message[]; total: number }>;
   createMessage(message: InsertMessage): Promise<Message>;
   deleteMessage(id: string): Promise<{ id: string; conversationId: string } | null>;
+  deleteConversation(id: string): Promise<void>;
   
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
@@ -204,6 +205,10 @@ export class DatabaseStorage implements IStorage {
       .returning({ id: messages.id, conversationId: messages.conversationId });
 
     return deleted ?? null;
+  }
+
+  async deleteConversation(id: string): Promise<void> {
+    await db.delete(conversations).where(eq(conversations.id, id));
   }
 
   async getUser(id: string): Promise<User | undefined> {

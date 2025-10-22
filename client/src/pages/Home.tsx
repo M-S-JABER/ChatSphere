@@ -145,6 +145,27 @@ export default function Home() {
     },
   });
 
+  const deleteConversationMutation = useMutation({
+    mutationFn: async (conversationId: string) => {
+      await apiRequest("DELETE", `/api/conversations/${conversationId}`);
+    },
+    onSuccess: () => {
+      setSelectedConversationId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
+      toast({
+        title: "Conversation deleted",
+        description: "All messages in the conversation have been removed.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to delete conversation",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleSendMessage = (body: string, mediaUrl?: string) => {
     if (!selectedConversation) return;
     sendMessageMutation.mutate({
@@ -183,6 +204,11 @@ export default function Home() {
 
   const handleCreateConversation = (payload: { phone: string; body?: string }) => {
     createConversationMutation.mutate(payload);
+  };
+
+  const handleDeleteConversation = async () => {
+    if (!selectedConversation) return;
+    await deleteConversationMutation.mutateAsync(selectedConversation.id);
   };
 
   return (
@@ -224,6 +250,10 @@ export default function Home() {
           }
           deletingMessageId={deleteMessageMutation.variables ?? null}
           isDeletingMessage={deleteMessageMutation.isPending}
+          onDeleteConversation={
+            canDeleteMessages && selectedConversation ? handleDeleteConversation : undefined
+          }
+          isDeletingConversation={deleteConversationMutation.isPending}
         />
       </div>
 

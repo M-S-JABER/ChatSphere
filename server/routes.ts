@@ -410,6 +410,20 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
     }
   });
 
+  app.delete("/api/conversations/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        return res.status(400).json({ error: "Conversation id is required" });
+      }
+
+      await storage.deleteConversation(id);
+      res.json({ ok: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/conversations", async (req: Request, res: Response) => {
     try {
       const { phone, displayName } = req.body as {
