@@ -35,6 +35,22 @@ export type WhatsappInstanceConfig = {
   source?: "custom" | "env";
 };
 
+export type CustomWebhookResponseConfig = {
+  get: {
+    enabled: boolean;
+    status: number;
+    contentType: string;
+    body: string;
+  };
+  post: {
+    enabled: boolean;
+    status: number;
+    contentType: string;
+    body: string;
+  };
+  updatedAt?: string;
+};
+
 export interface IStorage {
   getConversations(page?: number, pageSize?: number, archived?: boolean): Promise<{ items: Conversation[]; total: number }>;
   getConversationByPhone(phone: string): Promise<Conversation | undefined>;
@@ -69,6 +85,8 @@ export interface IStorage {
   getDefaultWhatsappInstance(): Promise<WhatsappInstanceConfig | null>;
   setDefaultWhatsappInstance(config: WhatsappInstanceConfig): Promise<void>;
   clearDefaultWhatsappInstance(): Promise<void>;
+  getCustomWebhookResponse(): Promise<CustomWebhookResponseConfig>;
+  setCustomWebhookResponse(config: CustomWebhookResponseConfig): Promise<void>;
   
   sessionStore: session.Store;
 }
@@ -440,6 +458,54 @@ export class DatabaseStorage implements IStorage {
 
   async clearDefaultWhatsappInstance(): Promise<void> {
     await db.delete(appSettings).where(eq(appSettings.key, "defaultWhatsappInstance"));
+  }
+
+  private defaultCustomWebhookResponse(): CustomWebhookResponseConfig {
+    return {
+      get: {
+        enabled: true,
+        status: 200,
+        contentType: "text/plain",
+        body: "{{query.hub.challenge}}",
+      },
+      post: {
+        enabled: true,
+        status: 200,
+        contentType: "application/json",
+        body: "{{json body}}",
+      },
+    };
+  }
+
+  async getCustomWebhookResponse(): Promise<CustomWebhookResponseConfig> {
+    const stored = await this.getAppSetting("customWebhookResponse");
+    if (!stored) {
+      return this.defaultCustomWebhookResponse();
+    }
+    return {
+      ...this.defaultCustomWebhookResponse(),
+      ...stored,
+    };
+  }
+
+  async setCustomWebhookResponse(config: CustomWebhookResponseConfig): Promise<void> {
+    const payload: CustomWebhookResponseConfig = {
+      get: {
+        enabled: config.get?.enabled ?? true,
+        status: typeof config.get?.status === "number" ? config.get.status : 200,
+        contentType: config.get?.contentType || "text/plain",
+        body: typeof config.get?.body === "string" ? config.get.body : "{{query.hub.challenge}}",
+      },
+      post: {
+        enabled: config.post?.enabled ?? true,
+        status: typeof config.post?.status === "number" ? config.post.status : 200,
+        contentType: config.post?.contentType || "application/json",
+        body: typeof config.post?.body === "string" ? config.post.body : "{{json body}}",
+      },
+      updatedAt: new Date().toISOString(),
+    };
+
+    await this.setAppSetting("customWebhookResponse", payload);
   }
 
   // App settings (simple key/value JSON store)

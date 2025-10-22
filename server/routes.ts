@@ -8,6 +8,42 @@ import { storage, type WhatsappInstanceConfig } from "./storage";
 import { MetaProvider } from "./providers/meta";
 import { WebhookDebugger } from "./debug-webhook";
 
+function resolvePath(source: any, path: string): any {
+  if (!source) return undefined;
+  return path.split(".").reduce((acc, key) => {
+    if (acc && typeof acc === "object" && key in acc) {
+      return acc[key];
+    }
+    return undefined;
+  }, source as any);
+}
+
+function renderTemplate(template: string, context: {
+  query: Record<string, any>;
+  body: any;
+  headers: Record<string, any>;
+}): string {
+  if (!template) return "";
+
+  let output = template;
+
+  output = output.replace(/{{\s*(query|body|headers)\.([^{}\s]+)\s*}}/g, (_, scope: string, path: string) => {
+    const value = resolvePath(scope === "query" ? context.query : scope === "body" ? context.body : context.headers, path);
+    return value !== undefined ? String(value) : "";
+  });
+
+  output = output.replace(/{{\s*json\s+(query|body|headers)\s*}}/g, (_, scope: string) => {
+    try {
+      const value = scope === "query" ? context.query : scope === "body" ? context.body : context.headers;
+      return JSON.stringify(value ?? {});
+    } catch {
+      return "";
+    }
+  });
+
+  return output;
+}
+
 // Helper function to create a Meta provider using persisted settings (with env fallback)
 async function createMetaProvider(): Promise<{
   provider: MetaProvider;
@@ -126,6 +162,26 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
     if (typeof testWebhookEnabled === 'boolean') current.testWebhookEnabled = testWebhookEnabled;
     await storage.setAppSetting('apiControls', current);
     res.json(current);
+  });
+
+  app.get('/api/admin/custom-webhook', requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const config = await storage.getCustomWebhookResponse();
+      res.json({ config });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put('/api/admin/custom-webhook', requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const config = req.body as any;
+      await storage.setCustomWebhookResponse(config);
+      const updated = await storage.getCustomWebhookResponse();
+      res.json({ config: updated });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
   });
 
   app.get('/api/admin/whatsapp/default-instance', requireAdmin, async (_req: Request, res: Response) => {
@@ -464,29 +520,123 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
 
   // Meta webhook verification (GET request)
   app.get("/webhook/meta", async (req: Request, res: Response) => {
+    const mode = req.query["hub.mode"];
+    const challenge = req.query["hub.challenge"];
+    const verifyToken = req.query["hub.verify_token"];
+
+    const isVerificationAttempt =
+      typeof mode === "string" &&
+      mode.toLowerCase() === "subscribe" &&
+      typeof challenge === "string";
+
+    if (!isVerificationAttempt) {
+      return res
+        .status(200)
+        .send(
+          "Meta webhook endpoint is online. To verify, Meta will call this URL with hub.mode=subscribe, hub.verify_token, and hub.challenge query parameters."
+        );
+    }
+
     try {
-      // Log the verification attempt
+      const { provider, instance } = await createMetaProvider();
+      const expectedToken =
+        instance?.webhookVerifyToken ??
+        process.env.META_VERIFY_TOKEN ??
+        "";
+
+      if (!expectedToken) {
+        console.warn("Webhook verification attempted but no verify token is configured.");
+        await storage.logWebhookEvent({
+          headers: req.headers,
+          query: req.query,
+          body: null,
+          response: { status: 500, body: "Missing verify token configuration" },
+        });
+        return res
+          .status(500)
+          .send(
+            "Verify token is not configured. Set META_VERIFY_TOKEN or update the Default WhatsApp Instance."
+          );
+      }
+
+      if (verifyToken !== expectedToken) {
+        console.warn(
+          `Webhook verification failed: provided token "${verifyToken}" does not match configured token.`
+        );
+        await storage.logWebhookEvent({
+          headers: req.headers,
+          query: req.query,
+          body: null,
+          response: { status: 403, body: "Forbidden" },
+        });
+        return res.status(403).send("Forbidden");
+      }
+
       await storage.logWebhookEvent({
         headers: req.headers,
         query: req.query,
         body: null,
-        response: null,
+        response: { status: 200, body: String(challenge) },
       });
-
-      const { provider } = await createMetaProvider();
-
-      // Verify webhook
-      if (provider.verifyWebhook(req)) {
-        const challenge = req.query["hub.challenge"];
-        await storage.logWebhookEvent({ headers: req.headers, query: req.query, body: null, response: { status: 200, body: String(challenge) } });
-        return res.status(200).send(challenge);
-      }
-
-      await storage.logWebhookEvent({ headers: req.headers, query: req.query, body: null, response: { status: 403, body: 'Forbidden' } });
-      res.status(403).send("Forbidden");
+      res.status(200).send(challenge);
     } catch (error: any) {
       console.error("Webhook verification error:", error);
+      await storage.logWebhookEvent({
+        headers: req.headers,
+        query: req.query,
+        body: null,
+        response: { status: 500, body: error.message },
+      });
       res.status(500).send("Error");
+    }
+  });
+
+  app.get("/webhook/custom", async (req: Request, res: Response) => {
+    try {
+      const config = await storage.getCustomWebhookResponse();
+      if (!config.get.enabled) {
+        return res.status(404).send("Custom GET webhook is disabled.");
+      }
+
+      const body = renderTemplate(config.get.body, {
+        query: req.query as Record<string, any>,
+        body: null,
+        headers: req.headers as Record<string, any>,
+      });
+
+      res.status(config.get.status).type(config.get.contentType || "text/plain").send(body);
+    } catch (error: any) {
+      console.error("Custom webhook GET error:", error);
+      res.status(500).send("Custom webhook error");
+    }
+  });
+
+  app.post("/webhook/custom", async (req: Request, res: Response) => {
+    try {
+      const config = await storage.getCustomWebhookResponse();
+      if (!config.post.enabled) {
+        return res.status(404).json({ error: "Custom POST webhook is disabled." });
+      }
+
+      const body = renderTemplate(config.post.body, {
+        query: req.query as Record<string, any>,
+        body: req.body,
+        headers: req.headers as Record<string, any>,
+      });
+
+      if ((config.post.contentType || "").includes("application/json")) {
+        try {
+          return res.status(config.post.status).type(config.post.contentType).send(body ? JSON.parse(body) : {});
+        } catch {
+          res.status(config.post.status).type(config.post.contentType).send(body);
+          return;
+        }
+      }
+
+      res.status(config.post.status).type(config.post.contentType || "text/plain").send(body);
+    } catch (error: any) {
+      console.error("Custom webhook POST error:", error);
+      res.status(500).json({ error: "Custom webhook error" });
     }
   });
 
