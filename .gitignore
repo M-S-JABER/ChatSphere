@@ -3,4 +3,9 @@ dist
 .DS_Store
 server/public
 vite.config.ts.*
+<<<<<<< HEAD
 *.tar.gz
+=======
+*.tar.gz.env
+uploads/
+>>>>>>> e069247 (Initial commit (without .env and uploads))
