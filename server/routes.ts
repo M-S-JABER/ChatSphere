@@ -44,6 +44,50 @@ function renderTemplate(template: string, context: {
   return output;
 }
 
+function resolvePublicMediaUrl(req: Request, mediaPath: string): string {
+  if (!mediaPath) {
+    return mediaPath;
+  }
+
+  if (/^https?:\/\//i.test(mediaPath)) {
+    return mediaPath;
+  }
+
+  const configuredBase =
+    process.env.MEDIA_PUBLIC_BASE_URL ||
+    process.env.PUBLIC_BASE_URL ||
+    process.env.PUBLIC_APP_URL;
+
+  if (configuredBase) {
+    const base = configuredBase.replace(/\/+$/, "");
+    const path = mediaPath.startsWith("/") ? mediaPath : `/${mediaPath}`;
+    return `${base}${path}`;
+  }
+
+  const host = req.get("host");
+  if (!host) {
+    return mediaPath;
+  }
+
+  const forwardedProto = req.get("x-forwarded-proto");
+  let protocol = forwardedProto ? forwardedProto.split(",")[0]?.trim() : req.protocol;
+
+  if (!protocol || protocol === "http") {
+    const hostLower = host.toLowerCase();
+    const isLocalHost =
+      hostLower.startsWith("localhost") ||
+      hostLower.startsWith("127.") ||
+      hostLower.startsWith("0.0.0.0");
+
+    if (!isLocalHost) {
+      protocol = "https";
+    }
+  }
+
+  const path = mediaPath.startsWith("/") ? mediaPath : `/${mediaPath}`;
+  return `${protocol || "https"}://${host}${path}`;
+}
+
 // Helper function to create a Meta provider using persisted settings (with env fallback)
 async function createMetaProvider(): Promise<{
   provider: MetaProvider;
@@ -364,7 +408,8 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
       }
 
       const fileUrl = `/uploads/${req.file.filename}`;
-      res.json({ url: fileUrl });
+      const publicUrl = resolvePublicMediaUrl(req, fileUrl);
+      res.json({ url: fileUrl, publicUrl });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -510,11 +555,9 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
       let mediaMetadata: { url: string; filename?: string } | null = null;
 
       try {
-        let providerMediaUrl = media_url;
-        if (media_url && media_url.startsWith('/')) {
-          const baseUrl = `${req.protocol}://${req.get('host')}`;
-          providerMediaUrl = `${baseUrl}${media_url}`;
-        }
+        const providerMediaUrl = media_url
+          ? resolvePublicMediaUrl(req, media_url)
+          : undefined;
 
         if (media_url) {
           const normalizedUrl = media_url.split('?')[0].split('#')[0];
