@@ -129,7 +129,7 @@ export function MessageThread({
       }
 
       const data = await response.json();
-      onSendMessage("", data.url);
+      onSendMessage("", data.publicUrl ?? data.url);
     } catch (error: any) {
       toast({
         title: "Upload failed",

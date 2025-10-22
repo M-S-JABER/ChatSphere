@@ -64,28 +64,27 @@ function resolvePublicMediaUrl(req: Request, mediaPath: string): string {
     return `${base}${path}`;
   }
 
-  const host = req.get("host");
+  const forwardedHost = req.get("x-forwarded-host");
+  const host = forwardedHost || req.get("host");
   if (!host) {
     return mediaPath;
   }
 
   const forwardedProto = req.get("x-forwarded-proto");
-  let protocol = forwardedProto ? forwardedProto.split(",")[0]?.trim() : req.protocol;
+  let protocol = forwardedProto ? forwardedProto.split(",")[0]?.trim() : undefined;
 
-  if (!protocol || protocol === "http") {
-    const hostLower = host.toLowerCase();
-    const isLocalHost =
-      hostLower.startsWith("localhost") ||
-      hostLower.startsWith("127.") ||
-      hostLower.startsWith("0.0.0.0");
-
-    if (!isLocalHost) {
-      protocol = "https";
-    }
+  if (!protocol) {
+    protocol = req.protocol;
   }
 
+  if (!protocol) {
+    protocol = "http";
+  }
+
+  protocol = protocol.replace(/:$/, "").toLowerCase();
+
   const path = mediaPath.startsWith("/") ? mediaPath : `/${mediaPath}`;
-  return `${protocol || "https"}://${host}${path}`;
+  return `${protocol}://${host}${path}`;
 }
 
 // Helper function to create a Meta provider using persisted settings (with env fallback)

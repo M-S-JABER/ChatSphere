@@ -5,10 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
-import { ArrowLeft, ShieldAlert, Copy, Zap, Save, RotateCcw } from "lucide-react";
+import { ArrowLeft, ShieldAlert, Copy, Zap, Save, RotateCcw, Globe, Link2 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { UserMenu } from "@/components/UserMenu";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -17,21 +17,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
 import { apiRequest } from "@/lib/queryClient";
 
-type WebhookBehaviorOption = "auto" | "accept" | "reject";
-
 interface DefaultInstance {
   id: string;
   name: string;
   phoneNumberId: string;
-  webhookBehavior: WebhookBehaviorOption;
   isActive: boolean;
   source?: "custom" | "env";
   updatedAt: string | null;
   accessTokenConfigured: boolean;
-  webhookVerifyTokenConfigured: boolean;
-  appSecretConfigured: boolean;
-  hasAppSecret: boolean;
-  hasVerifyToken: boolean;
 }
 
 interface DefaultInstanceResponse {
@@ -93,38 +86,45 @@ export default function Settings() {
 
   const [instanceName, setInstanceName] = useState("Default WhatsApp Instance");
   const [phoneNumberId, setPhoneNumberId] = useState("");
-  const [webhookBehavior, setWebhookBehavior] = useState<WebhookBehaviorOption>("auto");
   const [isInstanceActive, setIsInstanceActive] = useState(true);
   const [accessTokenInput, setAccessTokenInput] = useState("");
   const [accessTokenDirty, setAccessTokenDirty] = useState(false);
-  const [verifyTokenInput, setVerifyTokenInput] = useState("");
-  const [verifyTokenDirty, setVerifyTokenDirty] = useState(false);
-  const [appSecretInput, setAppSecretInput] = useState("");
-  const [appSecretDirty, setAppSecretDirty] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [webhookConfigs, setWebhookConfigs] = useState<WebhookUrlConfig[]>(
     cloneWebhookConfigs(DEFAULT_WEBHOOK_CONFIG),
+  );
+  const webhookBaseUrl = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    try {
+      const origin = window.location.origin || "";
+      return origin.replace(/\/+$/, "");
+    } catch {
+      return "";
+    }
+  }, []);
+
+  const buildWebhookUrl = useCallback(
+    (path: string) => {
+      if (!webhookBaseUrl) return path;
+      const normalized = path.startsWith("/") ? path : `/${path}`;
+      return `${webhookBaseUrl}${normalized}`;
+    },
+    [webhookBaseUrl],
   );
 
   const populateInstanceForm = useCallback((data: DefaultInstance | null | undefined) => {
     if (data) {
       setInstanceName(data.name || "Default WhatsApp Instance");
       setPhoneNumberId(data.phoneNumberId || "");
-      setWebhookBehavior(data.webhookBehavior || "auto");
       setIsInstanceActive(data.isActive ?? true);
     } else {
       setInstanceName("Default WhatsApp Instance");
       setPhoneNumberId("");
-      setWebhookBehavior("auto");
       setIsInstanceActive(true);
     }
 
     setAccessTokenInput("");
     setAccessTokenDirty(false);
-    setVerifyTokenInput("");
-    setVerifyTokenDirty(false);
-    setAppSecretInput("");
-    setAppSecretDirty(false);
     setFormError(null);
   }, []);
 
@@ -223,7 +223,6 @@ export default function Settings() {
     const payload: Record<string, any> = {
       name: instanceName.trim() || "Default WhatsApp Instance",
       phoneNumberId: phoneNumberId.trim(),
-      webhookBehavior,
       isActive: isInstanceActive,
     };
 
@@ -242,16 +241,6 @@ export default function Settings() {
     } else if (!instance?.accessTokenConfigured) {
       setFormError("Access token is required.");
       return;
-    }
-
-    if (verifyTokenDirty) {
-      const trimmedVerify = verifyTokenInput.trim();
-      payload.webhookVerifyToken = trimmedVerify ? trimmedVerify : null;
-    }
-
-    if (appSecretDirty) {
-      const trimmedSecret = appSecretInput.trim();
-      payload.appSecret = trimmedSecret ? trimmedSecret : null;
     }
 
     setFormError(null);
@@ -370,7 +359,7 @@ export default function Settings() {
               ) : (
                 <>
                   {instance ? (
-                    <>
+                    <div className="space-y-3">
                       <div className="flex flex-wrap gap-2">
                         <Badge variant={instance.isActive ? "default" : "destructive"}>
                           {instance.isActive ? "Active" : "Inactive"}
@@ -379,25 +368,19 @@ export default function Settings() {
                           Source: {(instance.source ?? "custom").toUpperCase()}
                         </Badge>
                         <Badge variant={instance.accessTokenConfigured ? "default" : "destructive"}>
-                          {instance.accessTokenConfigured ? "Access token configured" : "Access token missing"}
-                        </Badge>
-                        <Badge variant={instance.hasVerifyToken ? "default" : "secondary"}>
-                          {instance.hasVerifyToken ? "Verify token configured" : "No verify token"}
-                        </Badge>
-                        <Badge variant={instance.hasAppSecret ? "default" : "secondary"}>
-                          {instance.hasAppSecret ? "App secret configured" : "No app secret"}
+                          {instance.accessTokenConfigured ? "Access token stored" : "Access token missing"}
                         </Badge>
                       </div>
                       <p className="text-xs text-muted-foreground">
                         {instance.updatedAt
                           ? `Last updated ${new Date(instance.updatedAt).toLocaleString()}`
-                          : "Loaded from environment variables. Save changes below to override."}
+                          : "Loaded from environment variables. Save changes below to override them."}
                       </p>
-                    </>
+                    </div>
                   ) : (
                     <Alert>
                       <AlertDescription>
-                        No default WhatsApp instance is configured yet. Provide credentials below to enable messaging and webhook verification.
+                        No default WhatsApp instance is configured yet. Add your business phone and access token to enable messaging.
                       </AlertDescription>
                     </Alert>
                   )}
@@ -412,7 +395,7 @@ export default function Settings() {
                           placeholder="Default WhatsApp Instance"
                         />
                         <p className="text-xs text-muted-foreground">
-                          Display name used across diagnostics and logs.
+                          Friendly name shown in diagnostics and logs.
                         </p>
                       </div>
                       <div className="space-y-2">
@@ -424,86 +407,35 @@ export default function Settings() {
                           placeholder="e.g. 123456789012345"
                         />
                         <p className="text-xs text-muted-foreground">
-                          The WhatsApp Business phone number ID associated with your account.
+                          Copy it from <span className="font-medium">WhatsApp Manager → API Setup</span>.
                         </p>
                       </div>
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="access-token">Permanent Access Token</Label>
-                        <Input
-                          id="access-token"
-                          type="password"
-                          value={accessTokenInput}
-                          placeholder={instance?.accessTokenConfigured ? "••••••••••" : "Enter access token"}
-                          onChange={(event) => {
-                            setAccessTokenInput(event.target.value);
-                            setAccessTokenDirty(true);
-                          }}
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          {instance?.accessTokenConfigured
-                            ? "Leave blank to keep the existing token."
-                            : "Paste the access token generated from Meta."}
-                        </p>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="webhook-behavior">Webhook Behavior</Label>
-                        <Select
-                          value={webhookBehavior}
-                          onValueChange={(value) => setWebhookBehavior(value as WebhookBehaviorOption)}
-                        >
-                          <SelectTrigger id="webhook-behavior">
-                            <SelectValue placeholder="Select behavior" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="auto">Auto (Recommended)</SelectItem>
-                            <SelectItem value="accept">Always accept</SelectItem>
-                            <SelectItem value="reject">Always reject</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs text-muted-foreground">
-                          Controls how webhook events are handled during diagnostics.
-                        </p>
-                      </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="access-token">Permanent Access Token</Label>
+                      <Input
+                        id="access-token"
+                        type="password"
+                        value={accessTokenInput}
+                        placeholder={instance?.accessTokenConfigured ? "••••••••••" : "Enter access token"}
+                        onChange={(event) => {
+                          setAccessTokenInput(event.target.value);
+                          setAccessTokenDirty(true);
+                        }}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {instance?.accessTokenConfigured
+                          ? "Leave blank to keep the current token. Paste a new value to overwrite it."
+                          : "Paste the permanent token with whatsapp_business_messaging scope."}
+                      </p>
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="verify-token">Webhook Verify Token (optional)</Label>
-                        <Input
-                          id="verify-token"
-                          type="password"
-                          value={verifyTokenInput}
-                          onChange={(event) => {
-                            setVerifyTokenInput(event.target.value);
-                            setVerifyTokenDirty(true);
-                          }}
-                          placeholder={instance?.webhookVerifyTokenConfigured ? "••••••••••" : "Enter verify token"}
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          {instance?.webhookVerifyTokenConfigured
-                            ? "Leave blank to keep the current token or submit empty to clear it."
-                            : "Used when validating webhook setup with Meta."}
-                        </p>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="app-secret">App Secret (optional)</Label>
-                        <Input
-                          id="app-secret"
-                          type="password"
-                          value={appSecretInput}
-                          onChange={(event) => {
-                            setAppSecretInput(event.target.value);
-                            setAppSecretDirty(true);
-                          }}
-                          placeholder={instance?.appSecretConfigured ? "••••••••••" : "Enter app secret"}
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Used to verify incoming webhook signatures.
-                        </p>
-                      </div>
+                    <div className="rounded-lg border border-dashed bg-muted/40 p-4 text-xs text-muted-foreground">
+                      <p className="font-medium text-foreground">Need help?</p>
+                      <p className="mt-1">
+                        1) Generate a permanent token in Business Manager. 2) Paste it above. 3) Use the webhook URLs below to finish Meta verification.
+                      </p>
                     </div>
 
                     {formError && (
@@ -554,19 +486,67 @@ export default function Settings() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              <div className="flex flex-col gap-3 rounded-lg border bg-muted/40 p-4 md:flex-row md:items-center md:justify-between">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-md bg-background">
+                    <Globe className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Public base URL</p>
+                    <p className="text-xs text-muted-foreground">
+                      {webhookBaseUrl
+                        ? webhookBaseUrl
+                        : "The full URL will appear once the app is running in a browser."}
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="md:self-end"
+                  disabled={!webhookBaseUrl}
+                  onClick={() => webhookBaseUrl && copyToClipboard(webhookBaseUrl)}
+                >
+                  <Copy className="mr-2 h-4 w-4" />
+                  Copy base URL
+                </Button>
+              </div>
               <form onSubmit={handleWebhookConfigSubmit} className="space-y-6">
                 <div className="space-y-4">
                   {isWebhookConfigLoading ? (
                     <div className="text-sm text-muted-foreground">Loading webhook URLs…</div>
                   ) : (
-                    webhookConfigs.map((cfg, index) => (
-                      <div key={`${cfg.method}-${index}`} className="space-y-4 rounded border p-4">
-                        <div className="grid gap-3 md:grid-cols-[160px,1fr] md:items-center">
-                          <div className="space-y-1">
-                            <Label>HTTP Method</Label>
-                            <Select
-                              value={cfg.method}
-                              onValueChange={(value: WebhookMethod) =>
+                    webhookConfigs.map((cfg, index) => {
+                      const fullUrl = buildWebhookUrl(cfg.path || "");
+                      return (
+                        <div key={`${cfg.method}-${index}`} className="space-y-4 rounded border p-4">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                Full webhook URL
+                              </p>
+                              <p className="font-mono text-sm text-foreground break-all">
+                                {fullUrl}
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="self-start sm:self-auto"
+                              onClick={() => copyToClipboard(fullUrl)}
+                            >
+                              <Link2 className="mr-2 h-4 w-4" />
+                              Copy URL
+                            </Button>
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-[160px,1fr] md:items-center">
+                            <div className="space-y-1">
+                              <Label>HTTP Method</Label>
+                              <Select
+                                value={cfg.method}
+                                onValueChange={(value: WebhookMethod) =>
                                 setWebhookConfigs((prev) => {
                                   const next = [...prev];
                                   next[index] = { ...next[index], method: value };
@@ -598,69 +578,71 @@ export default function Settings() {
                               required
                             />
                           </div>
-                        </div>
-
-                        <div className="space-y-3">
-                          <div>
-                            <Label className="text-sm">Respond to Webhook</Label>
-                            <p className="text-xs text-muted-foreground">
-                              Configure the fixed response returned to the caller after your server processes the request.
-                            </p>
                           </div>
 
-                          <div className="grid gap-3 md:grid-cols-[160px,1fr] md:items-start">
-                            <div className="space-y-1">
-                              <Label>Response Code</Label>
-                              <Input
-                                type="number"
-                                min={100}
-                                max={599}
-                                value={cfg.response.status}
-                                onChange={(event) =>
-                                  setWebhookConfigs((prev) => {
-                                    const next = [...prev];
-                                    const status = Number(event.target.value);
-                                    next[index] = {
-                                      ...next[index],
-                                      response: {
-                                        ...next[index].response,
-                                        status: Number.isFinite(status)
-                                          ? status
-                                          : next[index].response.status,
-                                      },
-                                    };
-                                    return next;
-                                  })
-                                }
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label>Response Body</Label>
-                              <Textarea
-                                value={cfg.response.body}
-                                onChange={(event) =>
-                                  setWebhookConfigs((prev) => {
-                                    const next = [...prev];
-                                    next[index] = {
-                                      ...next[index],
-                                      response: {
-                                        ...next[index].response,
-                                        body: event.target.value,
-                                      },
-                                    };
-                                    return next;
-                                  })
-                                }
-                                className="min-h-[140px]"
-                              />
+                          <div className="space-y-3">
+                            <div>
+                              <Label className="text-sm">Respond to Webhook</Label>
                               <p className="text-xs text-muted-foreground">
-                                Use helpers like <code>{"{{query.hub.challenge}}"}</code> or <code>{"{{json body}}"}</code> to inject request data into the reply.
+                                Configure the canned response your server returns after processing the event.
                               </p>
                             </div>
+
+                            <div className="grid gap-3 md:grid-cols-[160px,1fr] md:items-start">
+                              <div className="space-y-1">
+                                <Label>Response Code</Label>
+                                <Input
+                                  type="number"
+                                  min={100}
+                                  max={599}
+                                  value={cfg.response.status}
+                                  onChange={(event) =>
+                                    setWebhookConfigs((prev) => {
+                                      const next = [...prev];
+                                      const status = Number(event.target.value);
+                                      next[index] = {
+                                        ...next[index],
+                                        response: {
+                                          ...next[index].response,
+                                          status: Number.isFinite(status)
+                                            ? status
+                                            : next[index].response.status,
+                                        },
+                                      };
+                                      return next;
+                                    })
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label>Response Body</Label>
+                                <Textarea
+                                  value={cfg.response.body}
+                                  onChange={(event) =>
+                                    setWebhookConfigs((prev) => {
+                                      const next = [...prev];
+                                      next[index] = {
+                                        ...next[index],
+                                        response: {
+                                          ...next[index].response,
+                                          body: event.target.value,
+                                        },
+                                      };
+                                      return next;
+                                    })
+                                  }
+                                  className="min-h-[140px]"
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  Use helpers such as <code>{"{{query.hub.challenge}}"}</code> or{" "}
+                                  <code>{"{{json body}}"}</code> to inject request data into the reply.
+                                </p>
+                              </div>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
 

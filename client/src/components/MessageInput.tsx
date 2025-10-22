@@ -43,7 +43,7 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
         }
 
         const data = await response.json();
-        mediaUrl = data.url;
+        mediaUrl = data.publicUrl ?? data.url;
       } catch (error: any) {
         toast({
           title: "Upload failed",
