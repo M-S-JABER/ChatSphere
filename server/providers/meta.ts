@@ -1,5 +1,6 @@
 import { IWhatsAppProvider, SendMessageResponse, IncomingMessageEvent } from "./base";
 import crypto from "crypto";
+import path from "path";
 
 export class MetaProvider implements IWhatsAppProvider {
   private token: string;
@@ -36,10 +37,53 @@ export class MetaProvider implements IWhatsAppProvider {
     };
 
     if (mediaUrl) {
-      messagePayload.type = "image";
-      messagePayload.image = { link: mediaUrl };
-      if (body) {
-        messagePayload.image.caption = body;
+      const normalizedUrl = mediaUrl.split("?")[0].split("#")[0];
+      const extension = path.extname(normalizedUrl || "").toLowerCase();
+
+      const asImage = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
+      const asVideo = [".mp4", ".mov", ".avi", ".mkv", ".webm"];
+      const asAudio = [".mp3", ".mpeg", ".ogg", ".wav", ".aac"];
+      const asDocument = [
+        ".pdf",
+        ".doc",
+        ".docx",
+        ".xls",
+        ".xlsx",
+        ".ppt",
+        ".pptx",
+        ".txt",
+        ".csv",
+      ];
+
+      const filename = path.basename(normalizedUrl || "attachment");
+
+      if (asImage.includes(extension)) {
+        messagePayload.type = "image";
+        messagePayload.image = { link: mediaUrl };
+        if (body) {
+          messagePayload.image.caption = body;
+        }
+      } else if (asVideo.includes(extension)) {
+        messagePayload.type = "video";
+        messagePayload.video = { link: mediaUrl };
+        if (body) {
+          messagePayload.video.caption = body;
+        }
+      } else if (asAudio.includes(extension)) {
+        messagePayload.type = "audio";
+        messagePayload.audio = { link: mediaUrl };
+      } else if (asDocument.includes(extension) || extension.length === 0) {
+        messagePayload.type = "document";
+        messagePayload.document = { link: mediaUrl, filename };
+        if (body) {
+          messagePayload.document.caption = body;
+        }
+      } else {
+        messagePayload.type = "document";
+        messagePayload.document = { link: mediaUrl, filename };
+        if (body) {
+          messagePayload.document.caption = body;
+        }
       }
     } else if (body) {
       messagePayload.type = "text";
@@ -143,6 +187,22 @@ export class MetaProvider implements IWhatsAppProvider {
               event.media = { url: msg.image?.link || msg.image?.id };
               event.body = msg.image?.caption;
               console.log(`🖼️ MetaProvider.parseIncoming - Image message from ${msg.from}: ${event.body || 'No caption'}`);
+            } else if (msg.type === "document") {
+              event.media = {
+                url: msg.document?.link || msg.document?.id,
+                filename: msg.document?.filename,
+              };
+              event.body = msg.document?.caption;
+              console.log(
+                `📄 MetaProvider.parseIncoming - Document message from ${msg.from}: ${msg.document?.filename || 'No filename'}`
+              );
+            } else if (msg.type === "video") {
+              event.media = { url: msg.video?.link || msg.video?.id };
+              event.body = msg.video?.caption;
+              console.log(`🎬 MetaProvider.parseIncoming - Video message from ${msg.from}`);
+            } else if (msg.type === "audio") {
+              event.media = { url: msg.audio?.link || msg.audio?.id };
+              console.log(`🎵 MetaProvider.parseIncoming - Audio message from ${msg.from}`);
             } else {
               console.log(`❓ MetaProvider.parseIncoming - Unknown message type: ${msg.type}`);
             }

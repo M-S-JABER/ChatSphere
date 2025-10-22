@@ -1,6 +1,13 @@
 import { type Message } from "@shared/schema";
 import { format } from "date-fns";
-import { Check, CheckCheck, MoreHorizontal, Trash2 } from "lucide-react";
+import {
+  Check,
+  CheckCheck,
+  Download,
+  FileText,
+  MoreHorizontal,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -18,6 +25,23 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message, canDelete, onDelete, isDeleting }: MessageBubbleProps) {
   const isOutgoing = message.direction === "out";
+
+  const mediaUrl = message.media?.url ?? undefined;
+  const mediaFilename = message.media?.filename || (mediaUrl ? mediaUrl.split("/").pop()?.split("?")[0] : undefined);
+
+  const extension = mediaUrl
+    ? mediaUrl.split("?")[0].split("#")[0].split(".").pop()?.toLowerCase() || ""
+    : "";
+
+  const isImage = extension
+    ? ["jpg", "jpeg", "png", "gif", "webp"].includes(extension)
+    : false;
+
+  const isDocument = extension ? ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv"].includes(extension) : false;
+
+  const isVideo = extension ? ["mp4", "mov", "avi", "mkv", "webm"].includes(extension) : false;
+
+  const isAudio = extension ? ["mp3", "mpeg", "ogg", "wav", "aac"].includes(extension) : false;
 
   const formatTime = (date: string | Date) => {
     try {
@@ -87,14 +111,38 @@ export function MessageBubble({ message, canDelete, onDelete, isDeleting }: Mess
         }}
         data-testid={`message-${message.id}`}
       >
-        {message.media?.url && (
+        {mediaUrl && (
           <div className="mb-2">
-            <img
-              src={message.media.url}
-              alt="Message attachment"
-              className="rounded-md max-w-[320px] w-full h-auto"
-              data-testid="message-image"
-            />
+            {isImage ? (
+              <img
+                src={mediaUrl}
+                alt={mediaFilename || "Message attachment"}
+                className="rounded-md max-w-[320px] w-full h-auto"
+                data-testid="message-image"
+              />
+            ) : (
+              <a
+                href={mediaUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`flex items-center gap-3 rounded-md border px-3 py-2 text-sm transition hover:brightness-95 ${
+                  isOutgoing ? "border-primary-foreground/30" : "border-border"
+                }`}
+              >
+                <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                  <FileText className="h-5 w-5" />
+                </div>
+                <div className="flex-1 overflow-hidden">
+                  <div className="truncate font-medium">
+                    {mediaFilename || "Attachment"}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {isDocument ? "Document" : isVideo ? "Video" : isAudio ? "Audio" : "File"}
+                  </div>
+                </div>
+                <Download className="h-4 w-4" />
+              </a>
+            )}
           </div>
         )}
         

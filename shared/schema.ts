@@ -41,7 +41,7 @@ export const messages = pgTable("messages", {
   conversationId: varchar("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
   direction: text("direction").notNull(),
   body: text("body"),
-  media: json("media").$type<{ url: string } | null>(),
+  media: json("media").$type<{ url: string; filename?: string } | null>(),
   providerMessageId: text("provider_message_id"),
   status: text("status").notNull().default("received"),
   raw: json("raw"),

@@ -507,15 +507,21 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
       const { provider } = await createMetaProvider();
       let providerMessageId: string | null = null;
       let status: string = "sent";
-      
+      let mediaMetadata: { url: string; filename?: string } | null = null;
+
       try {
-        // Convert local file paths to full URLs for providers
         let providerMediaUrl = media_url;
         if (media_url && media_url.startsWith('/')) {
           const baseUrl = `${req.protocol}://${req.get('host')}`;
           providerMediaUrl = `${baseUrl}${media_url}`;
         }
-        
+
+        if (media_url) {
+          const normalizedUrl = media_url.split('?')[0].split('#')[0];
+          const filename = path.basename(normalizedUrl || "attachment");
+          mediaMetadata = { url: media_url, filename };
+        }
+
         const providerResp = await provider.send(to, body, providerMediaUrl);
         providerMessageId = providerResp.id || null;
       } catch (providerError: any) {
@@ -527,7 +533,7 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
         conversationId: conversation.id,
         direction: "out",
         body: body || null,
-        media: media_url ? { url: media_url } : null,
+        media: mediaMetadata,
         providerMessageId,
         status,
       });

@@ -6,7 +6,10 @@ export interface SendMessageResponse {
 export interface IncomingMessageEvent {
   from: string;
   body?: string;
-  media?: { url: string };
+  media?: {
+    url: string;
+    filename?: string;
+  };
   raw?: any;
 }
 

@@ -218,51 +218,54 @@ export function MessageThread({
                 {getInitials(conversation.phone, conversation.displayName)}
               </AvatarFallback>
             </Avatar>
-            <div>
-              <h2 className="font-medium text-foreground">{getDisplayName()}</h2>
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <h2 className="font-medium text-foreground">{getDisplayName()}</h2>
+                {onDeleteConversation && (
+                  <AlertDialog open={deleteConversationOpen} onOpenChange={setDeleteConversationOpen}>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        aria-label="Delete conversation"
+                        className="h-7 w-7 text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete entire conversation?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will remove all messages in this conversation. This action cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={async () => {
+                            if (!onDeleteConversation) return;
+                            try {
+                              await onDeleteConversation();
+                              setDeleteConversationOpen(false);
+                            } catch (error) {
+                              console.error(error);
+                            }
+                          }}
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          disabled={isDeletingConversation}
+                        >
+                          {isDeletingConversation ? "Deleting..." : "Delete"}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground font-mono">{conversation.phone}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {onDeleteConversation && (
-              <AlertDialog open={deleteConversationOpen} onOpenChange={setDeleteConversationOpen}>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label="Delete conversation"
-                  >
-                    <Trash2 className="h-5 w-5" />
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete entire conversation?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This will remove all messages in this conversation. This action cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={async () => {
-                        if (!onDeleteConversation) return;
-                        try {
-                          await onDeleteConversation();
-                          setDeleteConversationOpen(false);
-                        } catch (error) {
-                          console.error(error);
-                        }
-                      }}
-                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                      disabled={isDeletingConversation}
-                    >
-                      {isDeletingConversation ? "Deleting..." : "Delete"}
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            )}
             <Button size="icon" variant="ghost" data-testid="button-menu">
               <MoreVertical className="h-5 w-5" />
             </Button>
