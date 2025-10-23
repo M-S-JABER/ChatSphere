@@ -1,4 +1,4 @@
-import { type Message } from "@shared/schema";
+import type { ChatMessage } from "@/types/messages";
 import { format } from "date-fns";
 import {
   Check,
@@ -17,13 +17,30 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 interface MessageBubbleProps {
-  message: Message;
+  message: ChatMessage;
   canDelete?: boolean;
   onDelete?: () => void;
   isDeleting?: boolean;
+  onReply?: (message: ChatMessage) => void;
+  onScrollToMessage?: (messageId: string) => void;
 }
 
-export function MessageBubble({ message, canDelete, onDelete, isDeleting }: MessageBubbleProps) {
+const getReplyLabel = (direction: string) => (direction === "in" ? "Customer" : "Agent");
+
+const getSnippet = (body: string | null | undefined) => {
+  if (!body) return "[Original message unavailable]";
+  const trimmed = body.trim();
+  return trimmed.length > 120 ? `${trimmed.slice(0, 117)}…` : trimmed;
+};
+
+export function MessageBubble({
+  message,
+  canDelete,
+  onDelete,
+  isDeleting,
+  onReply,
+  onScrollToMessage,
+}: MessageBubbleProps) {
   const isOutgoing = message.direction === "out";
 
   const mediaUrl = message.media?.url ?? undefined;
@@ -61,7 +78,10 @@ export function MessageBubble({ message, canDelete, onDelete, isDeleting }: Mess
   };
 
   return (
-    <div className={`group relative flex ${isOutgoing ? "justify-end" : "justify-start"}`}>
+    <div
+      id={`message-${message.id}`}
+      className={`group relative flex ${isOutgoing ? "justify-end" : "justify-start"}`}
+    >
       {canDelete && onDelete && (
         <div
           className={`absolute top-1 ${
@@ -111,6 +131,30 @@ export function MessageBubble({ message, canDelete, onDelete, isDeleting }: Mess
         }}
         data-testid={`message-${message.id}`}
       >
+        {message.replyTo && (
+          <button
+            type="button"
+            onClick={() => {
+              if (message.replyTo?.id) {
+                onScrollToMessage?.(message.replyTo.id);
+              }
+            }}
+            className={`mb-2 w-full rounded-md border px-2 py-1 text-left text-xs transition ${
+              isOutgoing
+                ? "border-primary-foreground/40 bg-primary-foreground/10 hover:bg-primary-foreground/20"
+                : "border-border bg-muted/60 hover:bg-muted"
+            }`}
+            aria-label={`View replied message: ${getSnippet(message.replyTo?.body ?? "")}`}
+          >
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Replying to {getReplyLabel(message.replyTo?.direction ?? "in")}
+            </div>
+            <div className="line-clamp-1 text-xs text-foreground/80">
+              {getSnippet(message.replyTo?.body ?? null)}
+            </div>
+          </button>
+        )}
+
         {mediaUrl && (
           <div className="mb-2">
             {isImage ? (
@@ -151,7 +195,7 @@ export function MessageBubble({ message, canDelete, onDelete, isDeleting }: Mess
             {message.body}
           </p>
         )}
-        
+
         <div className={`flex items-center justify-end gap-1 mt-1 text-xs ${
           isOutgoing ? "text-primary-foreground/70" : "text-muted-foreground"
         }`}>
@@ -159,6 +203,21 @@ export function MessageBubble({ message, canDelete, onDelete, isDeleting }: Mess
           {getStatusIcon()}
         </div>
       </div>
+
+      {!isOutgoing && onReply && (
+        <div className="absolute -bottom-6 left-0 opacity-0 transition group-hover:opacity-100">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs text-muted-foreground"
+            onClick={() => onReply(message)}
+            aria-label="Reply to this message"
+          >
+            Reply
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

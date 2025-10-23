@@ -37,6 +37,7 @@ export default defineConfig({
       deny: ["**/.*"],
     },
   },
+  // @ts-expect-error Vitest configuration is not part of Vite type declarations
   test: {
     environment: "jsdom",
     globals: true,

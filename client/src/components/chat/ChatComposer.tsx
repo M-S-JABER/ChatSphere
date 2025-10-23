@@ -3,7 +3,6 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -18,18 +17,30 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import EmojiPicker, { EmojiClickData } from "emoji-picker-react";
-import { Smile, Paperclip, Send } from "lucide-react";
+import { Smile, Paperclip, Send, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type ComposerAttachment = Attachment;
 
+type ReplyContext = {
+  id: string;
+  senderLabel: string;
+  snippet: string;
+};
+
 export type ChatComposerProps = {
-  onSend: (payload: { text: string; attachments: ComposerAttachment[] }) => Promise<void> | void;
+  onSend: (payload: {
+    text: string;
+    attachments: ComposerAttachment[];
+    replyToMessageId?: string;
+  }) => Promise<void> | void;
   maxFiles?: number;
   maxFileSizeMB?: number;
   acceptedTypes?: ReadonlyArray<string>;
   disabled?: boolean;
   className?: string;
+  replyTo?: ReplyContext | null;
+  onClearReply?: () => void;
 };
 
 export interface ChatComposerHandle {
@@ -72,6 +83,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
     acceptedTypes = DEFAULT_ACCEPTED_TYPES,
     disabled,
     className,
+    replyTo,
+    onClearReply,
   },
   ref,
 ) => {
@@ -256,9 +269,14 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
     setErrors([]);
     setIsSubmitting(true);
     try {
-      await onSend({ text: trimmed, attachments });
+      await onSend({
+        text: trimmed,
+        attachments,
+        replyToMessageId: replyTo?.id,
+      });
       setMessage("");
       clearAttachments();
+      onClearReply?.();
     } finally {
       setIsSubmitting(false);
     }
@@ -278,6 +296,32 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
         event.preventDefault();
       }}
     >
+      {replyTo && (
+        <div
+          className="flex items-start justify-between rounded-lg border border-primary/40 bg-primary/10 px-3 py-2"
+          aria-live="polite"
+        >
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+              Replying to {replyTo.senderLabel}
+            </p>
+            <p className="text-sm text-primary-foreground/90 line-clamp-2">
+              {replyTo.snippet}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="ml-2 text-primary"
+            onClick={onClearReply}
+            aria-label={`Clear reply to: ${replyTo.snippet}`}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
+
       <AttachmentBar attachments={attachments} onRemove={removeAttachment} />
 
       {errors.length > 0 && (

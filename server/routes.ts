@@ -550,21 +550,81 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
 
   app.post("/api/message/send", async (req: Request, res: Response) => {
     try {
-      const { to, body, media_url } = req.body;
+      const {
+        to,
+        body,
+        media_url,
+        conversationId,
+        replyToMessageId,
+      } = req.body as {
+        to?: string;
+        body?: string | null;
+        media_url?: string | null;
+        conversationId?: string | null;
+        replyToMessageId?: string | null;
+      };
 
-      if (!to || (!body && !media_url)) {
-        return res.status(400).json({ error: "to and (body or media_url) required" });
+      if (!conversationId && !to) {
+        return res.status(400).json({ error: "conversationId or to is required." });
       }
 
-      let conversation = await storage.getConversationByPhone(to);
-      
-      // If no conversation exists, create one
+      if (!body && !media_url) {
+        return res.status(400).json({ error: "body or media_url is required." });
+      }
+
+      let conversation = null as Awaited<ReturnType<typeof storage.getConversationById>> | null;
+
+      if (conversationId) {
+        conversation = await storage.getConversationById(conversationId);
+        if (!conversation) {
+          return res.status(404).json({ error: "Conversation not found." });
+        }
+      }
+
       if (!conversation) {
-        conversation = await storage.createConversation({ 
-          phone: to,
-          createdByUserId: req.user?.id ?? null,
-        });
+        if (!to) {
+          return res.status(400).json({ error: "Recipient phone number is required." });
+        }
+
+        conversation = await storage.getConversationByPhone(to);
+
+        if (!conversation) {
+          conversation = await storage.createConversation({
+            phone: to,
+            createdByUserId: req.user?.id ?? null,
+          });
+        }
       }
+
+      const recipientPhone = conversation.phone;
+      let replyTarget = null as Awaited<ReturnType<typeof storage.getMessageById>> | null;
+
+      if (replyToMessageId) {
+        const messageTarget = await storage.getMessageById(replyToMessageId);
+
+        if (!messageTarget) {
+          return res.status(400).json({ error: "Reply target not found." });
+        }
+
+        if (messageTarget.conversationId !== conversation.id) {
+          return res.status(400).json({ error: "Reply target belongs to a different conversation." });
+        }
+
+        if (messageTarget.direction !== "in") {
+          return res.status(400).json({ error: "You can only reply to incoming messages." });
+        }
+
+        replyTarget = messageTarget;
+      }
+
+      console.info(
+        "message_send_attempt",
+        JSON.stringify({
+          conversationId: conversation.id,
+          replyToMessageId: replyToMessageId ?? null,
+          hasMedia: Boolean(media_url),
+        }),
+      );
 
       const { provider } = await createMetaProvider();
       let providerMessageId: string | null = null;
@@ -582,7 +642,7 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
           mediaMetadata = { url: media_url, filename };
         }
 
-        const providerResp = await provider.send(to, body, providerMediaUrl);
+        const providerResp = await provider.send(recipientPhone, body ?? undefined, providerMediaUrl);
         providerMessageId = providerResp.id || null;
       } catch (providerError: any) {
         console.warn("Failed to send via provider, saving locally:", providerError.message);
@@ -596,14 +656,27 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
         media: mediaMetadata,
         providerMessageId,
         status,
+        replyToMessageId: replyToMessageId ?? null,
         sentByUserId: req.user?.id ?? null,
-      });
+      } as any);
 
       await storage.updateConversationLastAt(conversation.id);
 
-      broadcastMessage("message_outgoing", message);
+      const messageWithReply = await storage.getMessageWithReplyById(message.id);
 
-      res.json({ ok: true, message });
+      res.json({ ok: true, message: messageWithReply ?? message });
+
+      broadcastMessage("message_outgoing", messageWithReply ?? message);
+
+      console.info(
+        "message_sent_reply",
+        JSON.stringify({
+          messageId: message.id,
+          conversationId: conversation.id,
+          replyToMessageId: replyToMessageId ?? null,
+          validReply: Boolean(replyTarget),
+        }),
+      );
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -776,7 +849,8 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
           media: event.media || null,
           status: "received",
           raw: event.raw,
-        });
+          replyToMessageId: null,
+        } as any);
 
         console.log(`✅ Message saved with ID: ${message.id}`);
 
@@ -992,7 +1066,8 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
         media: media || null,
         status: "received",
         raw: req.body,
-      });
+        replyToMessageId: null,
+      } as any);
 
       await storage.updateConversationLastAt(conversation.id);
 

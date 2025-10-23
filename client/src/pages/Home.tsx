@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { type Conversation, type Message } from "@shared/schema";
+import { type Conversation } from "@shared/schema";
 import { ConversationList } from "@/components/ConversationList";
 import { MessageThread } from "@/components/MessageThread";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Settings } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { type ChatMessage } from "@/types/messages";
 
 export default function Home() {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
@@ -65,7 +66,7 @@ export default function Home() {
 
   const { data: messagesData, isLoading: messagesLoading } = useQuery<{
     total: number;
-    items: Message[];
+    items: ChatMessage[];
   }>({
     queryKey: ["/api/conversations", selectedConversationId, "messages"],
     enabled: !!selectedConversationId,
@@ -74,8 +75,26 @@ export default function Home() {
   const messages = messagesData?.items || [];
 
   const sendMessageMutation = useMutation({
-    mutationFn: async ({ to, body, mediaUrl }: { to: string; body: string; mediaUrl?: string }) => {
-      return await apiRequest("POST", "/api/message/send", { to, body, media_url: mediaUrl });
+    mutationFn: async ({
+      to,
+      body,
+      mediaUrl,
+      conversationId,
+      replyToMessageId,
+    }: {
+      to: string;
+      body: string;
+      mediaUrl?: string;
+      conversationId: string;
+      replyToMessageId?: string;
+    }) => {
+      return await apiRequest("POST", "/api/message/send", {
+        to,
+        body,
+        media_url: mediaUrl,
+        conversationId,
+        replyToMessageId,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
@@ -166,7 +185,11 @@ export default function Home() {
     },
   });
 
-  const handleSendMessage = async (body: string, mediaUrl?: string) => {
+  const handleSendMessage = async (
+    body: string,
+    mediaUrl?: string,
+    replyToMessageId?: string | null,
+  ) => {
     if (!selectedConversation) {
       throw new Error("No conversation selected");
     }
@@ -174,6 +197,8 @@ export default function Home() {
       to: selectedConversation.phone,
       body,
       mediaUrl,
+      conversationId: selectedConversation.id,
+      replyToMessageId: replyToMessageId ?? undefined,
     });
   };
 
@@ -188,10 +213,11 @@ export default function Home() {
         setSelectedConversationId(data.conversation.id);
       }
       const trimmedBody = variables.body?.trim();
-      if (trimmedBody) {
+      if (trimmedBody && data.conversation?.id) {
         sendMessageMutation.mutate({
-          to: data.conversation?.phone ?? variables.phone,
+          to: data.conversation.phone ?? variables.phone,
           body: trimmedBody,
+          conversationId: data.conversation.id,
         });
       }
     },

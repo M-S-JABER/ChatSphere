@@ -41,7 +41,8 @@ export function formatBytes(size: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
   const exponent = Math.min(Math.floor(Math.log(size) / Math.log(1024)), units.length - 1);
   const value = size / Math.pow(1024, exponent);
-  return `${value.toFixed(value >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
+  const formatted = value.toFixed(value >= 10 || exponent === 0 ? 0 : 1);
+  return `${formatted.replace(/\.0$/, "")} ${units[exponent]}`;
 }
 
 export function isImage(mime: string): boolean {

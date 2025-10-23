@@ -3,7 +3,9 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { AttachmentBar, type Attachment } from "../AttachmentBar";
 
 const makeAttachment = (overrides: Partial<Attachment> = {}): Attachment => {
-  const file = overrides.file ?? new File(["hello"], overrides.name ?? "note.txt", { type: overrides.mime ?? "text/plain" });
+  const baseName = overrides.name ?? "note.txt";
+  const baseMime = overrides.mime ?? "text/plain";
+  const file = overrides.file ?? new File(["hello world"], baseName, { type: baseMime });
   return {
     id: overrides.id ?? "att-1",
     file,
@@ -22,7 +24,7 @@ describe("AttachmentBar", () => {
 
     render(<AttachmentBar attachments={attachments} onRemove={handleRemove} />);
 
-    expect(screen.getByText("document.pdf")).toBeInTheDocument();
+    expect(screen.getByText("document.pdf")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /remove document.pdf/i }));
     expect(handleRemove).toHaveBeenCalledWith("att-1");
@@ -37,7 +39,7 @@ describe("AttachmentBar", () => {
     fireEvent.click(screen.getByRole("button", { name: /preview notes.txt/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/hello/i)).toBeInTheDocument();
+      expect(screen.getByText(/hello world/i)).toBeTruthy();
     });
   });
 });

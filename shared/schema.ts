@@ -48,6 +48,9 @@ export const messages = pgTable("messages", {
   providerMessageId: text("provider_message_id"),
   status: text("status").notNull().default("received"),
   raw: json("raw"),
+  replyToMessageId: varchar("reply_to_message_id").references((): any => messages.id, {
+    onDelete: "set null",
+  }),
   sentByUserId: varchar("sent_by_user_id").references(() => users.id, {
     onDelete: "set null",
   }),
@@ -66,6 +69,10 @@ export const messagesRelations = relations(messages, ({ one }) => ({
   conversation: one(conversations, {
     fields: [messages.conversationId],
     references: [conversations.id],
+  }),
+  replyToMessage: one(messages, {
+    fields: [messages.replyToMessageId],
+    references: [messages.id],
   }),
   sender: one(users, {
     fields: [messages.sentByUserId],
@@ -108,6 +115,7 @@ export const insertMessageSchema = createInsertSchema(messages).omit({
   id: true,
   createdAt: true,
 }).extend({
+  replyToMessageId: z.string().uuid().optional().nullable(),
   sentByUserId: z.string().uuid().optional().nullable(),
 });
 

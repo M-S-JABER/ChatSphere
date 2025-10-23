@@ -15,7 +15,7 @@ import {
   type InsertUser,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql, and, inArray } from "drizzle-orm";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
 import { pool } from "./db";
@@ -48,8 +48,10 @@ export interface IStorage {
   updateConversationLastAt(id: string): Promise<void>;
   toggleConversationArchive(id: string, archived: boolean): Promise<Conversation>;
   
-  getMessages(conversationId: string, page?: number, pageSize?: number): Promise<{ items: Message[]; total: number }>;
+  getMessages(conversationId: string, page?: number, pageSize?: number): Promise<{ items: Array<Message & { replyTo?: ReplySummary | null }>; total: number }>;
   createMessage(message: InsertMessage): Promise<Message>;
+  getMessageById(id: string): Promise<Message | undefined>;
+  getMessageWithReplyById(id: string): Promise<(Message & { replyTo?: ReplySummary | null }) | undefined>;
   deleteMessage(id: string): Promise<{ id: string; conversationId: string } | null>;
   deleteConversation(id: string): Promise<void>;
   
@@ -80,6 +82,13 @@ export interface IStorage {
   
   sessionStore: session.Store;
 }
+
+export type ReplySummary = {
+  id: string;
+  body: string | null;
+  direction: string;
+  createdAt: Date;
+};
 
 export class DatabaseStorage implements IStorage {
   sessionStore: session.Store;
@@ -158,10 +167,9 @@ export class DatabaseStorage implements IStorage {
     conversationId: string,
     page: number = 1,
     pageSize: number = 50
-  ): Promise<{ items: Message[]; total: number }> {
+  ): Promise<{ items: Array<Message & { replyTo?: ReplySummary | null }>; total: number }> {
     const offset = (page - 1) * pageSize;
-
-    const [items, totalResult] = await Promise.all([
+    const [itemsRaw, totalRaw] = await Promise.all([
       db
         .select()
         .from(messages)
@@ -175,8 +183,51 @@ export class DatabaseStorage implements IStorage {
         .where(eq(messages.conversationId, conversationId)),
     ]);
 
+    const items = itemsRaw as Message[];
+    const totalResult = totalRaw as Array<{ count: number }>;
+
+    const replyIds = items
+      .map((message) => message.replyToMessageId)
+      .filter((value): value is string => Boolean(value));
+
+    const replyMap = new Map<string, ReplySummary>();
+
+    if (replyIds.length > 0) {
+      const replyMessages = (await db
+        .select({
+          id: messages.id,
+          body: messages.body,
+          direction: messages.direction,
+          createdAt: messages.createdAt,
+        })
+        .from(messages)
+        .where(inArray(messages.id, replyIds))
+        .execute()) as Array<{
+        id: string;
+        body: string | null;
+        direction: string;
+        createdAt: Date;
+      }>;
+
+      replyMessages.forEach((reply) => {
+        replyMap.set(reply.id, {
+          id: reply.id,
+          body: reply.body,
+          direction: reply.direction,
+          createdAt: reply.createdAt,
+        });
+      });
+    }
+
+    const itemsWithReplies: Array<Message & { replyTo?: ReplySummary | null }> = items.map(
+      (message) => ({
+        ...message,
+        replyTo: message.replyToMessageId ? replyMap.get(message.replyToMessageId) ?? null : null,
+      }),
+    );
+
     return {
-      items,
+      items: itemsWithReplies,
       total: totalResult[0]?.count || 0,
     };
   }
@@ -187,6 +238,47 @@ export class DatabaseStorage implements IStorage {
       .values(insertMessage as any)
       .returning();
     return message;
+  }
+
+  async getMessageById(id: string): Promise<Message | undefined> {
+    const [message] = (await db.select().from(messages).where(eq(messages.id, id))) as Message[];
+    return message;
+  }
+
+  async getMessageWithReplyById(id: string): Promise<(Message & { replyTo?: ReplySummary | null }) | undefined> {
+    const message = await this.getMessageById(id);
+    if (!message) return undefined;
+
+    if (!message.replyToMessageId) {
+      return { ...message, replyTo: null };
+    }
+
+    const [reply] = (await db
+      .select({
+        id: messages.id,
+        body: messages.body,
+        direction: messages.direction,
+        createdAt: messages.createdAt,
+      })
+      .from(messages)
+      .where(eq(messages.id, message.replyToMessageId))) as Array<{
+        id: string;
+        body: string | null;
+        direction: string;
+        createdAt: Date;
+      }>;
+
+    return {
+      ...message,
+      replyTo: reply
+        ? {
+            id: reply.id,
+            body: reply.body,
+            direction: reply.direction,
+            createdAt: reply.createdAt,
+          }
+        : null,
+    } as Message & { replyTo?: ReplySummary | null };
   }
 
   async deleteMessage(id: string): Promise<{ id: string; conversationId: string } | null> {

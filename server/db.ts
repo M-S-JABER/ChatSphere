@@ -64,6 +64,21 @@ export async function ensureSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS sent_by_user_id varchar REFERENCES users(id) ON DELETE SET NULL;
     `);
 
+    await client.query(`
+      ALTER TABLE messages
+      ADD COLUMN IF NOT EXISTS reply_to_message_id varchar REFERENCES messages(id) ON DELETE SET NULL;
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_messages_conversation_reply_to
+      ON messages (conversation_id, reply_to_message_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_messages_direction
+      ON messages (direction);
+    `);
+
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');
