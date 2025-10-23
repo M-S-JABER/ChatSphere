@@ -2,8 +2,9 @@ import type { Message } from "@shared/schema";
 
 export type ReplySummary = {
   id: string;
-  body: string | null;
-  direction: string;
+  content: string | null;
+  direction: "inbound" | "outbound";
+  senderLabel: string;
   createdAt: string;
 };
 

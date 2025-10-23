@@ -43,6 +43,14 @@ Preferred communication style: Simple, everyday language.
 
 **Storage Layer:** `DatabaseStorage` class for CRUD operations on conversations, messages, users; conversation archiving; and automatic `lastAt` updates.
 
+### Reply Workflow
+
+- Only inbound messages (`direction = inbound`) are eligible reply targets; outbound bubbles never surface the reply affordance.
+- Choosing to reply shows a compact context bar above the composer highlighting the sender label (e.g., Customer) and a trimmed snippet, with an accessible clear (`X`) control.
+- Composer submissions while a reply target is active send an outbound message that persists `reply_to_message_id` and returns a `replyTo` summary payload with `id`, `content`, `senderLabel`, and `createdAt`.
+- Server-side validation enforces conversation ownership and inbound direction; invalid attempts respond with HTTP 400 so the client can display “You can only reply to incoming messages from this conversation.”
+- Message bubbles that reference another message render a stub that includes a fallback snippet such as `[Original message unavailable]` and let users jump back to the source message.
+
 ### Authentication and Authorization
 
 **Authentication System:** Session-based authentication using Passport.js (local strategy), scrypt hashing for passwords, PostgreSQL-backed session store.

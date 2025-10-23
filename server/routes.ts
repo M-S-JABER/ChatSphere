@@ -610,7 +610,7 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
           return res.status(400).json({ error: "Reply target belongs to a different conversation." });
         }
 
-        if (messageTarget.direction !== "in") {
+        if (messageTarget.direction !== "inbound") {
           return res.status(400).json({ error: "You can only reply to incoming messages." });
         }
 
@@ -651,7 +651,7 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
 
       const message = await storage.createMessage({
         conversationId: conversation.id,
-        direction: "out",
+        direction: "outbound",
         body: body || null,
         media: mediaMetadata,
         providerMessageId,
@@ -844,7 +844,7 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
         console.log(`💾 Saving message to database...`);
         const message = await storage.createMessage({
           conversationId: conversation.id,
-          direction: "in",
+          direction: "inbound",
           body: event.body || null,
           media: event.media || null,
           status: "received",
@@ -1061,7 +1061,7 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
 
       const message = await storage.createMessage({
         conversationId: conversation.id,
-        direction: "in",
+        direction: "inbound",
         body: textBody || null,
         media: media || null,
         status: "received",

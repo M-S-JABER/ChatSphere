@@ -44,9 +44,9 @@ type ReplyContext = {
 };
 
 const buildSnippet = (body: string | null | undefined) => {
-  if (!body) return "[Original message]";
+  if (!body) return "[Original message unavailable]";
   const trimmed = body.trim();
-  if (!trimmed) return "[Original message]";
+  if (!trimmed) return "[Original message unavailable]";
   return trimmed.length > 120 ? `${trimmed.slice(0, 117)}…` : trimmed;
 };
 
@@ -166,11 +166,14 @@ export function MessageThread({
     }
   };
 
+  const getSenderLabel = (direction: string): ReplyContext["senderLabel"] =>
+    direction === "inbound" ? "Customer" : "Agent";
+
   const handleReplySelect = (message: ChatMessage) => {
-    if (message.direction !== "in") return;
+    if (message.direction !== "inbound") return;
     setReplyContext({
       id: message.id,
-      senderLabel: "Customer",
+      senderLabel: getSenderLabel(message.direction),
       snippet: buildSnippet(message.body ?? null),
     });
     composerRef.current?.insertText("");

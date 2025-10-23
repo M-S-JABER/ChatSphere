@@ -25,7 +25,7 @@ interface MessageBubbleProps {
   onScrollToMessage?: (messageId: string) => void;
 }
 
-const getReplyLabel = (direction: string) => (direction === "in" ? "Customer" : "Agent");
+const getReplyLabel = (direction: string) => (direction === "inbound" ? "Customer" : "Agent");
 
 const getSnippet = (body: string | null | undefined) => {
   if (!body) return "[Original message unavailable]";
@@ -41,7 +41,7 @@ export function MessageBubble({
   onReply,
   onScrollToMessage,
 }: MessageBubbleProps) {
-  const isOutgoing = message.direction === "out";
+  const isOutgoing = message.direction === "outbound";
 
   const mediaUrl = message.media?.url ?? undefined;
   const mediaFilename = message.media?.filename || (mediaUrl ? mediaUrl.split("/").pop()?.split("?")[0] : undefined);
@@ -144,13 +144,14 @@ export function MessageBubble({
                 ? "border-primary-foreground/40 bg-primary-foreground/10 hover:bg-primary-foreground/20"
                 : "border-border bg-muted/60 hover:bg-muted"
             }`}
-            aria-label={`View replied message: ${getSnippet(message.replyTo?.body ?? "")}`}
+            aria-label={`View replied message: ${getSnippet(message.replyTo?.content ?? "")}`}
           >
             <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Replying to {getReplyLabel(message.replyTo?.direction ?? "in")}
+              Replying to{" "}
+              {message.replyTo?.senderLabel ?? getReplyLabel(message.replyTo?.direction ?? "inbound")}
             </div>
             <div className="line-clamp-1 text-xs text-foreground/80">
-              {getSnippet(message.replyTo?.body ?? null)}
+              {getSnippet(message.replyTo?.content ?? null)}
             </div>
           </button>
         )}

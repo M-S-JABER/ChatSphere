@@ -79,6 +79,16 @@ export async function ensureSchema(): Promise<void> {
       ON messages (direction);
     `);
 
+    await client.query(`
+      UPDATE messages
+      SET direction = CASE 
+        WHEN direction = 'in' THEN 'inbound'
+        WHEN direction = 'out' THEN 'outbound'
+        ELSE direction
+      END
+      WHERE direction IN ('in', 'out');
+    `);
+
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');

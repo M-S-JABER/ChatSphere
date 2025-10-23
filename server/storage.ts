@@ -85,9 +85,14 @@ export interface IStorage {
 
 export type ReplySummary = {
   id: string;
-  body: string | null;
-  direction: string;
+  content: string | null;
+  direction: "inbound" | "outbound";
+  senderLabel: string;
   createdAt: Date;
+};
+
+const toSenderLabel = (direction: string): "Customer" | "Agent" => {
+  return direction === "inbound" ? "Customer" : "Agent";
 };
 
 export class DatabaseStorage implements IStorage {
@@ -196,7 +201,7 @@ export class DatabaseStorage implements IStorage {
       const replyMessages = (await db
         .select({
           id: messages.id,
-          body: messages.body,
+          content: messages.body,
           direction: messages.direction,
           createdAt: messages.createdAt,
         })
@@ -204,26 +209,32 @@ export class DatabaseStorage implements IStorage {
         .where(inArray(messages.id, replyIds))
         .execute()) as Array<{
         id: string;
-        body: string | null;
+        content: string | null;
         direction: string;
         createdAt: Date;
       }>;
 
       replyMessages.forEach((reply) => {
+        const normalizedDirection = reply.direction === "outbound" ? "outbound" : "inbound";
         replyMap.set(reply.id, {
           id: reply.id,
-          body: reply.body,
-          direction: reply.direction,
+          content: reply.content,
+          direction: normalizedDirection,
+          senderLabel: toSenderLabel(normalizedDirection),
           createdAt: reply.createdAt,
         });
       });
     }
 
     const itemsWithReplies: Array<Message & { replyTo?: ReplySummary | null }> = items.map(
-      (message) => ({
-        ...message,
-        replyTo: message.replyToMessageId ? replyMap.get(message.replyToMessageId) ?? null : null,
-      }),
+      (message) => {
+        const normalizedDirection = message.direction === "outbound" ? "outbound" : "inbound";
+        return {
+          ...message,
+          direction: normalizedDirection,
+          replyTo: message.replyToMessageId ? replyMap.get(message.replyToMessageId) ?? null : null,
+        };
+      },
     );
 
     return {
@@ -249,35 +260,43 @@ export class DatabaseStorage implements IStorage {
     const message = await this.getMessageById(id);
     if (!message) return undefined;
 
+    const normalizedMessageDirection = message.direction === "outbound" ? "outbound" : "inbound";
+
     if (!message.replyToMessageId) {
-      return { ...message, replyTo: null };
+      return { ...message, direction: normalizedMessageDirection, replyTo: null };
     }
 
     const [reply] = (await db
       .select({
         id: messages.id,
-        body: messages.body,
+        content: messages.body,
         direction: messages.direction,
         createdAt: messages.createdAt,
       })
       .from(messages)
       .where(eq(messages.id, message.replyToMessageId))) as Array<{
         id: string;
-        body: string | null;
+        content: string | null;
         direction: string;
         createdAt: Date;
       }>;
 
+    if (!reply) {
+      return { ...message, direction: normalizedMessageDirection, replyTo: null };
+    }
+
+    const normalizedReplyDirection = reply.direction === "outbound" ? "outbound" : "inbound";
+
     return {
       ...message,
-      replyTo: reply
-        ? {
-            id: reply.id,
-            body: reply.body,
-            direction: reply.direction,
-            createdAt: reply.createdAt,
-          }
-        : null,
+      direction: normalizedMessageDirection,
+      replyTo: {
+        id: reply.id,
+        content: reply.content,
+        direction: normalizedReplyDirection,
+        senderLabel: toSenderLabel(normalizedReplyDirection),
+        createdAt: reply.createdAt,
+      },
     } as Message & { replyTo?: ReplySummary | null };
   }
 
@@ -353,12 +372,12 @@ export class DatabaseStorage implements IStorage {
     const [incomingCount] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(messages)
-      .where(eq(messages.direction, 'in'));
+      .where(eq(messages.direction, "inbound"));
 
     const [outgoingCount] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(messages)
-      .where(eq(messages.direction, 'out'));
+      .where(eq(messages.direction, "outbound"));
 
     // Get most active conversations (top 5)
     const topConversations = await db
@@ -377,8 +396,8 @@ export class DatabaseStorage implements IStorage {
     const messagesByDay = await db
       .select({
         date: sql<string>`DATE(${messages.createdAt})`,
-        incoming: sql<number>`count(CASE WHEN ${messages.direction} = 'in' THEN 1 END)::int`,
-        outgoing: sql<number>`count(CASE WHEN ${messages.direction} = 'out' THEN 1 END)::int`,
+        incoming: sql<number>`count(CASE WHEN ${messages.direction} = 'inbound' THEN 1 END)::int`,
+        outgoing: sql<number>`count(CASE WHEN ${messages.direction} = 'outbound' THEN 1 END)::int`,
       })
       .from(messages)
       .where(sql`${messages.createdAt} >= NOW() - INTERVAL '7 days'`)
