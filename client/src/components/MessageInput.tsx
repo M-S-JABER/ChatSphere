@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, forwardRef, useImperativeHandle, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Send, Smile, Paperclip, X } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,7 +11,15 @@ interface MessageInputProps {
   disabled?: boolean;
 }
 
-export function MessageInput({ onSend, disabled }: MessageInputProps) {
+export interface MessageInputHandle {
+  attachFile: (file: File) => void;
+  insertText: (text: string) => void;
+}
+
+export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(function MessageInput(
+  { onSend, disabled },
+  ref
+) {
   const [message, setMessage] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -86,7 +94,7 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
     }, 0);
   };
 
-  const handleFileSelect = (file: File) => {
+  const handleFileSelect = useCallback((file: File) => {
     if (file.size > 10 * 1024 * 1024) {
       toast({
         title: "File too large",
@@ -128,7 +136,7 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
     } else {
       setFilePreview(null);
     }
-  };
+  }, [toast]);
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -151,6 +159,29 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
     }
   }, [message]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      attachFile: (file: File) => {
+        handleFileSelect(file);
+      },
+      insertText: (text: string) => {
+        if (!text) return;
+        setMessage((prev) => {
+          const next = prev ? `${prev}${text}` : text;
+          return next;
+        });
+        setTimeout(() => {
+          textareaRef.current?.focus();
+          const value = textareaRef.current?.value ?? "";
+          const end = value.length;
+          textareaRef.current?.setSelectionRange(end, end);
+        }, 0);
+      },
+    }),
+    [handleFileSelect]
+  );
 
   return (
     <div className="p-3 border-t border-border bg-card">
@@ -263,4 +294,4 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
       </div>
     </div>
   );
-}
+});

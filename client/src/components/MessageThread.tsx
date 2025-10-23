@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MoreVertical, Upload, Trash2 } from "lucide-react";
 import { MessageBubble } from "./MessageBubble";
-import { MessageInput } from "./MessageInput";
+import { MessageInput, type MessageInputHandle } from "./MessageInput";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useEffect, useRef, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -53,6 +53,8 @@ export function MessageThread({
   const { toast } = useToast();
   const [messagePendingDeletion, setMessagePendingDeletion] = useState<Message | null>(null);
   const [deleteConversationOpen, setDeleteConversationOpen] = useState(false);
+  const messageInputRef = useRef<MessageInputHandle>(null);
+  const [dragContentType, setDragContentType] = useState<"file" | "text" | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -63,8 +65,18 @@ export function MessageThread({
   }, [messages]);
 
   const handleDragOver = (e: React.DragEvent) => {
+    const types = Array.from(e.dataTransfer.types ?? []);
+    const hasFile = types.includes("Files");
+    const hasText = types.includes("text/plain") || types.includes("text/uri-list") || types.includes("text/html");
+
+    if (!hasFile && !hasText) {
+      return;
+    }
+
     e.preventDefault();
     e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+    setDragContentType(hasFile ? "file" : "text");
     setIsDragging(true);
   };
 
@@ -72,69 +84,32 @@ export function MessageThread({
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
+    setDragContentType(null);
   };
 
-  const handleDrop = async (e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
+    setDragContentType(null);
 
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length === 0) return;
+    const files = Array.from(e.dataTransfer.files ?? []);
 
-    const file = files[0];
-
-    if (file.size > 10 * 1024 * 1024) {
-      toast({
-        title: "File too large",
-        description: "Maximum file size is 10MB",
-        variant: "destructive",
-      });
+    if (files.length > 0) {
+      messageInputRef.current?.attachFile(files[0]);
       return;
     }
 
-    const allowedTypes = [
-      "image/jpeg",
-      "image/png",
-      "image/gif",
-      "image/webp",
-      "video/mp4",
-      "video/quicktime",
-      "audio/mpeg",
-      "audio/ogg",
-      "application/pdf",
-    ];
+    const textPayload =
+      e.dataTransfer.getData("text/plain") ||
+      e.dataTransfer.getData("text/uri-list") ||
+      e.dataTransfer.getData("text");
 
-    if (!allowedTypes.includes(file.type)) {
+    if (textPayload) {
+      messageInputRef.current?.insertText(textPayload);
       toast({
-        title: "Invalid file type",
-        description: "Only images, videos, audio, and PDFs are allowed",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-        credentials: "include",
-      });
-
-      if (!response.ok) {
-        throw new Error(await response.text());
-      }
-
-      const data = await response.json();
-      onSendMessage("", data.publicUrl ?? data.url);
-    } catch (error: any) {
-      toast({
-        title: "Upload failed",
-        description: error.message,
-        variant: "destructive",
+        title: "Text added",
+        description: "Dropped text has been inserted into the message box.",
       });
     }
   };
@@ -294,8 +269,14 @@ export function MessageThread({
               <div className="w-20 h-20 rounded-full bg-primary/20 flex items-center justify-center">
                 <Upload className="h-10 w-10 text-primary" />
               </div>
-              <p className="text-lg font-medium text-primary">Drop file to send</p>
-              <p className="text-sm text-muted-foreground">Images, videos, audio, and PDFs up to 10MB</p>
+              <p className="text-lg font-medium text-primary">
+                {dragContentType === "text" ? "Drop text to insert" : "Drop files to attach"}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {dragContentType === "text"
+                  ? "The dropped text will appear in the message box."
+                  : "Images, videos, audio, and PDFs up to 10MB are supported."}
+              </p>
             </div>
           </div>
         )}
@@ -330,7 +311,7 @@ export function MessageThread({
         </ScrollArea>
       </div>
 
-      <MessageInput onSend={onSendMessage} disabled={isSending} />
+      <MessageInput ref={messageInputRef} onSend={onSendMessage} disabled={isSending} />
 
       <AlertDialog
         open={!!messagePendingDeletion}

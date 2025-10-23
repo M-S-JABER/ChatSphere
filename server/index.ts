@@ -16,22 +16,30 @@ const app = express();
 
 app.set("trust proxy", true);
 
-app.use((req, res, next) => {
-  const forwardedProto = req.get("x-forwarded-proto");
-  const isHttps = req.secure || (forwardedProto && forwardedProto.split(",")[0]?.trim() === "https");
-  const upgradeHeader = req.get("upgrade");
+const enforceHttps =
+  typeof process.env.ENFORCE_HTTPS === "string"
+    ? process.env.ENFORCE_HTTPS.toLowerCase() === "true"
+    : false;
 
-  if (isHttps || (upgradeHeader && upgradeHeader.toLowerCase() === "websocket")) {
-    return next();
-  }
+if (enforceHttps) {
+  app.use((req, res, next) => {
+    const forwardedProto = req.get("x-forwarded-proto");
+    const primaryProto = forwardedProto?.split(",")[0]?.trim().toLowerCase();
+    const isHttps = req.secure || primaryProto === "https";
+    const upgradeHeader = req.get("upgrade");
 
-  const host = req.get("host");
-  if (!host) {
-    return next();
-  }
+    if (isHttps || (upgradeHeader && upgradeHeader.toLowerCase() === "websocket")) {
+      return next();
+    }
 
-  return res.redirect(301, `https://${host}${req.originalUrl}`);
-});
+    const host = req.get("host");
+    if (!host) {
+      return next();
+    }
+
+    return res.redirect(301, `https://${host}${req.originalUrl}`);
+  });
+}
 
 app.use(express.json({
   verify: (req: any, res, buf) => {
