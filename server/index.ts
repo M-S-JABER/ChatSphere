@@ -14,6 +14,25 @@ try {
 
 const app = express();
 
+app.set("trust proxy", true);
+
+app.use((req, res, next) => {
+  const forwardedProto = req.get("x-forwarded-proto");
+  const isHttps = req.secure || (forwardedProto && forwardedProto.split(",")[0]?.trim() === "https");
+  const upgradeHeader = req.get("upgrade");
+
+  if (isHttps || (upgradeHeader && upgradeHeader.toLowerCase() === "websocket")) {
+    return next();
+  }
+
+  const host = req.get("host");
+  if (!host) {
+    return next();
+  }
+
+  return res.redirect(301, `https://${host}${req.originalUrl}`);
+});
+
 app.use(express.json({
   verify: (req: any, res, buf) => {
     if (req.path.startsWith('/webhook/')) {

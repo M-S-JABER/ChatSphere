@@ -11,10 +11,8 @@ import { UserMenu } from "@/components/UserMenu";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Textarea } from "@/components/ui/textarea";
 import { apiRequest } from "@/lib/queryClient";
 
 interface DefaultInstance {
@@ -31,52 +29,12 @@ interface DefaultInstanceResponse {
   instance: DefaultInstance | null;
 }
 
-type WebhookMethod = "GET" | "POST";
-
-interface WebhookResponseConfig {
-  status: number;
-  body: string;
-}
-
-interface WebhookUrlConfig {
-  method: WebhookMethod;
+interface WebhookConfig {
   path: string;
-  response: WebhookResponseConfig;
+  updatedAt?: string | null;
 }
 
-const DEFAULT_WEBHOOK_CONFIG: WebhookUrlConfig[] = [
-  {
-    method: "GET",
-    path: "/webhook/meta",
-    response: {
-      status: 200,
-      body: "{{query.hub.challenge}}",
-    },
-  },
-  {
-    method: "POST",
-    path: "/webhook/custom",
-    response: {
-      status: 200,
-      body: "{{json body}}",
-    },
-  },
-];
-
-const cloneWebhookConfigs = (configs: WebhookUrlConfig[]): WebhookUrlConfig[] =>
-  configs.map((cfg) => ({
-    method: cfg.method === "POST" ? "POST" : "GET",
-    path: cfg.path?.trim() || (cfg.method === "GET" ? "/webhook/meta" : "/webhook/custom"),
-    response: {
-      status:
-        typeof cfg.response?.status === "number" && Number.isFinite(cfg.response.status)
-          ? cfg.response.status
-          : cfg.method === "GET"
-          ? 200
-          : 200,
-      body: typeof cfg.response?.body === "string" ? cfg.response.body : "",
-    },
-  }));
+const DEFAULT_WEBHOOK_PATH = "/webhook/meta";
 
 export default function Settings() {
   const { toast } = useToast();
@@ -90,9 +48,8 @@ export default function Settings() {
   const [accessTokenInput, setAccessTokenInput] = useState("");
   const [accessTokenDirty, setAccessTokenDirty] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [webhookConfigs, setWebhookConfigs] = useState<WebhookUrlConfig[]>(
-    cloneWebhookConfigs(DEFAULT_WEBHOOK_CONFIG),
-  );
+  const [webhookPath, setWebhookPath] = useState<string>(DEFAULT_WEBHOOK_PATH);
+  const [webhookUpdatedAt, setWebhookUpdatedAt] = useState<string | null>(null);
   const webhookBaseUrl = useMemo(() => {
     if (typeof window === "undefined") return "";
     try {
@@ -138,15 +95,17 @@ export default function Settings() {
     retry: false,
   });
 
-  const { data: customWebhookData, isLoading: isWebhookConfigLoading } = useQuery<WebhookUrlConfig[]>({
-    queryKey: ['/api/admin/custom-webhook'],
+  const { data: webhookConfigData, isLoading: isWebhookConfigLoading } = useQuery<WebhookConfig>({
+    queryKey: ['/api/admin/webhook-config'],
     queryFn: async () => {
-      const res = await fetch('/api/admin/custom-webhook', { credentials: 'include' });
+      const res = await fetch('/api/admin/webhook-config', { credentials: 'include' });
       if (!res.ok) throw new Error(await res.text());
       const payload = await res.json();
-      return Array.isArray(payload.config)
-        ? cloneWebhookConfigs(payload.config)
-        : cloneWebhookConfigs(DEFAULT_WEBHOOK_CONFIG);
+      const config = payload?.config as WebhookConfig | undefined;
+      return {
+        path: config?.path?.trim() || DEFAULT_WEBHOOK_PATH,
+        updatedAt: config?.updatedAt ?? null,
+      };
     },
     retry: false,
   });
@@ -159,13 +118,10 @@ export default function Settings() {
   }, [defaultInstanceData, populateInstanceForm]);
 
   useEffect(() => {
-    if (!customWebhookData) return;
-    setWebhookConfigs(
-      customWebhookData.length > 0
-        ? cloneWebhookConfigs(customWebhookData)
-        : cloneWebhookConfigs(DEFAULT_WEBHOOK_CONFIG),
-    );
-  }, [customWebhookData]);
+    if (!webhookConfigData) return;
+    setWebhookPath(webhookConfigData.path || DEFAULT_WEBHOOK_PATH);
+    setWebhookUpdatedAt(webhookConfigData.updatedAt ?? null);
+  }, [webhookConfigData]);
 
   const updateInstanceMutation = useMutation({
     mutationFn: async (payload: Record<string, any>) => {
@@ -189,20 +145,22 @@ export default function Settings() {
   });
 
   const updateWebhookConfigMutation = useMutation({
-    mutationFn: async (payload: WebhookUrlConfig[]) => {
-      const res = await apiRequest("PUT", "/api/admin/custom-webhook", payload);
+    mutationFn: async (payload: { path: string }) => {
+      const res = await apiRequest("PUT", "/api/admin/webhook-config", payload);
       const data = await res.json();
-      const configs = Array.isArray(data.config)
-        ? cloneWebhookConfigs(data.config)
-        : cloneWebhookConfigs(DEFAULT_WEBHOOK_CONFIG);
-      return configs;
+      const config = data?.config as WebhookConfig | undefined;
+      return {
+        path: config?.path?.trim() || DEFAULT_WEBHOOK_PATH,
+        updatedAt: config?.updatedAt ?? null,
+      };
     },
-    onSuccess: (configs) => {
-      setWebhookConfigs(configs);
-      queryClient.setQueryData<WebhookUrlConfig[]>(['/api/admin/custom-webhook'], configs);
+    onSuccess: (config) => {
+      setWebhookPath(config.path);
+      setWebhookUpdatedAt(config.updatedAt ?? null);
+      queryClient.setQueryData<WebhookConfig>(['/api/admin/webhook-config'], config);
       toast({
         title: "Webhook configuration updated",
-        description: "Custom webhook responses saved successfully.",
+        description: "Webhook endpoint updated successfully.",
       });
     },
     onError: (error: Error) => {
@@ -254,20 +212,31 @@ export default function Settings() {
 
   const handleWebhookConfigSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const payload = webhookConfigs.map((cfg, index) => ({
-      method: cfg.method,
-      path: cfg.path?.trim() || (cfg.method === "GET" ? "/webhook/meta" : "/webhook/custom"),
-      response: {
-        status: Number.isFinite(cfg.response.status) ? cfg.response.status : index === 0 ? 200 : 200,
-        body: cfg.response.body,
-      },
-    }));
+    const trimmedPath = webhookPath.trim();
+    if (!trimmedPath) {
+      toast({
+        variant: "destructive",
+        title: "Invalid webhook path",
+        description: "Please enter a valid path that starts with /webhook.",
+      });
+      return;
+    }
 
-    updateWebhookConfigMutation.mutate(payload);
+    if (!trimmedPath.startsWith("/webhook")) {
+      toast({
+        variant: "destructive",
+        title: "Invalid webhook path",
+        description: "The path must start with /webhook to ensure raw payload capture.",
+      });
+      return;
+    }
+
+    updateWebhookConfigMutation.mutate({ path: trimmedPath });
   };
 
   const handleWebhookReset = () => {
-    setWebhookConfigs(cloneWebhookConfigs(DEFAULT_WEBHOOK_CONFIG));
+    setWebhookPath(DEFAULT_WEBHOOK_PATH);
+    setWebhookUpdatedAt(null);
   };
 
   // Redirect non-admin users to home page
@@ -477,12 +446,12 @@ export default function Settings() {
             </CardContent>
           </Card>
 
-          {/* Webhook URLs */}
+          {/* Webhook Endpoint */}
           <Card>
             <CardHeader>
-              <CardTitle>Webhook URLs</CardTitle>
+              <CardTitle>Webhook Endpoint</CardTitle>
               <CardDescription>
-                Configure the HTTP paths and canned responses used by your webhook endpoints.
+                Manage the public path WhatsApp uses for verification and incoming messages.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -513,138 +482,52 @@ export default function Settings() {
                 </Button>
               </div>
               <form onSubmit={handleWebhookConfigSubmit} className="space-y-6">
-                <div className="space-y-4">
-                  {isWebhookConfigLoading ? (
-                    <div className="text-sm text-muted-foreground">Loading webhook URLs…</div>
-                  ) : (
-                    webhookConfigs.map((cfg, index) => {
-                      const fullUrl = buildWebhookUrl(cfg.path || "");
-                      return (
-                        <div key={`${cfg.method}-${index}`} className="space-y-4 rounded border p-4">
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                                Full webhook URL
-                              </p>
-                              <p className="font-mono text-sm text-foreground break-all">
-                                {fullUrl}
-                              </p>
-                            </div>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              className="self-start sm:self-auto"
-                              onClick={() => copyToClipboard(fullUrl)}
-                            >
-                              <Link2 className="mr-2 h-4 w-4" />
-                              Copy URL
-                            </Button>
-                          </div>
-                          <div className="grid gap-3 md:grid-cols-[160px,1fr] md:items-center">
-                            <div className="space-y-1">
-                              <Label>HTTP Method</Label>
-                              <Select
-                                value={cfg.method}
-                                onValueChange={(value: WebhookMethod) =>
-                                setWebhookConfigs((prev) => {
-                                  const next = [...prev];
-                                  next[index] = { ...next[index], method: value };
-                                  return next;
-                                })
-                              }
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select method" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="GET">GET</SelectItem>
-                                <SelectItem value="POST">POST</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-1">
-                            <Label>Path</Label>
-                            <Input
-                              value={cfg.path}
-                              onChange={(event) =>
-                                setWebhookConfigs((prev) => {
-                                  const next = [...prev];
-                                  next[index] = { ...next[index], path: event.target.value };
-                                  return next;
-                                })
-                              }
-                              placeholder="/webhook/custom"
-                              required
-                            />
-                          </div>
-                          </div>
-
-                          <div className="space-y-3">
-                            <div>
-                              <Label className="text-sm">Respond to Webhook</Label>
-                              <p className="text-xs text-muted-foreground">
-                                Configure the canned response your server returns after processing the event.
-                              </p>
-                            </div>
-
-                            <div className="grid gap-3 md:grid-cols-[160px,1fr] md:items-start">
-                              <div className="space-y-1">
-                                <Label>Response Code</Label>
-                                <Input
-                                  type="number"
-                                  min={100}
-                                  max={599}
-                                  value={cfg.response.status}
-                                  onChange={(event) =>
-                                    setWebhookConfigs((prev) => {
-                                      const next = [...prev];
-                                      const status = Number(event.target.value);
-                                      next[index] = {
-                                        ...next[index],
-                                        response: {
-                                          ...next[index].response,
-                                          status: Number.isFinite(status)
-                                            ? status
-                                            : next[index].response.status,
-                                        },
-                                      };
-                                      return next;
-                                    })
-                                  }
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label>Response Body</Label>
-                                <Textarea
-                                  value={cfg.response.body}
-                                  onChange={(event) =>
-                                    setWebhookConfigs((prev) => {
-                                      const next = [...prev];
-                                      next[index] = {
-                                        ...next[index],
-                                        response: {
-                                          ...next[index].response,
-                                          body: event.target.value,
-                                        },
-                                      };
-                                      return next;
-                                    })
-                                  }
-                                  className="min-h-[140px]"
-                                />
-                                <p className="text-xs text-muted-foreground">
-                                  Use helpers such as <code>{"{{query.hub.challenge}}"}</code> or{" "}
-                                  <code>{"{{json body}}"}</code> to inject request data into the reply.
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
+                {isWebhookConfigLoading ? (
+                  <div className="text-sm text-muted-foreground">Loading webhook endpoint…</div>
+                ) : (
+                  <div className="space-y-4 rounded border p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                          Full webhook URL
+                        </p>
+                        <p className="font-mono text-sm text-foreground break-all">
+                          {buildWebhookUrl(webhookPath)}
+                        </p>
+                        {webhookUpdatedAt && (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Last updated {new Date(webhookUpdatedAt).toLocaleString()}
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="self-start sm:self-auto"
+                        onClick={() => copyToClipboard(buildWebhookUrl(webhookPath))}
+                      >
+                        <Link2 className="mr-2 h-4 w-4" />
+                        Copy URL
+                      </Button>
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="webhook-path">Path</Label>
+                      <Input
+                        id="webhook-path"
+                        value={webhookPath}
+                        onChange={(event) => setWebhookPath(event.target.value)}
+                        placeholder="/webhook/meta"
+                        required
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        This endpoint handles both the GET verification challenge and incoming POST
+                        messages. Keep the path under <code>/webhook/…</code> so Meta can verify
+                        signatures correctly.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
                   <Button
@@ -656,13 +539,13 @@ export default function Settings() {
                     Reset to defaults
                   </Button>
                   <Button type="submit" disabled={updateWebhookConfigMutation.isPending}>
-                    {updateWebhookConfigMutation.isPending ? "Saving..." : "Save webhook URLs"}
+                    {updateWebhookConfigMutation.isPending ? "Saving..." : "Save webhook URL"}
                   </Button>
                 </div>
               </form>
 
               <p className="text-xs text-muted-foreground">
-                Tip: append secret query parameters (for example <code>{"?token=xxxx"}</code>) and validate them inside your response template.
+                WhatsApp will perform a GET request for verification and POST messages to the same URL.
               </p>
             </CardContent>
           </Card>

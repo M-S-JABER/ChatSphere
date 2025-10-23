@@ -35,17 +35,8 @@ export type WhatsappInstanceConfig = {
   source?: "custom" | "env";
 };
 
-export type CustomWebhookRouteConfig = {
-  method: "GET" | "POST";
+export type MetaWebhookSettings = {
   path: string;
-  response: {
-    status: number;
-    body: string;
-  };
-};
-
-export type CustomWebhookSettings = {
-  routes: CustomWebhookRouteConfig[];
   updatedAt?: string;
 };
 
@@ -84,8 +75,8 @@ export interface IStorage {
   getDefaultWhatsappInstance(): Promise<WhatsappInstanceConfig | null>;
   setDefaultWhatsappInstance(config: WhatsappInstanceConfig): Promise<void>;
   clearDefaultWhatsappInstance(): Promise<void>;
-  getCustomWebhookResponse(): Promise<CustomWebhookSettings>;
-  setCustomWebhookResponse(routes: CustomWebhookRouteConfig[]): Promise<void>;
+  getMetaWebhookSettings(): Promise<MetaWebhookSettings>;
+  setMetaWebhookSettings(settings: MetaWebhookSettings): Promise<void>;
   
   sessionStore: session.Store;
 }
@@ -317,16 +308,141 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(messages.createdAt))
       .limit(10);
 
+    // User-level statistics
+    const usersList = await db
+      .select({
+        id: users.id,
+        username: users.username,
+        role: users.role,
+        createdAt: users.createdAt,
+      })
+      .from(users);
+
+    const messagesByUser = await db
+      .select({
+        userId: messages.sentByUserId,
+        totalMessages: sql<number>`count(${messages.id})::int`,
+        mediaMessages: sql<number>`count(CASE WHEN ${messages.media} IS NOT NULL THEN 1 END)::int`,
+        conversationsTouched: sql<number>`count(DISTINCT ${messages.conversationId})::int`,
+        lastSentAt: sql<string | null>`max(${messages.createdAt})`,
+      })
+      .from(messages)
+      .where(sql`${messages.sentByUserId} IS NOT NULL`)
+      .groupBy(messages.sentByUserId);
+
+    const conversationsByUser = await db
+      .select({
+        userId: conversations.createdByUserId,
+        totalConversations: sql<number>`count(${conversations.id})::int`,
+        lastCreatedAt: sql<string | null>`max(${conversations.createdAt})`,
+      })
+      .from(conversations)
+      .where(sql`${conversations.createdByUserId} IS NOT NULL`)
+      .groupBy(conversations.createdByUserId);
+
+    const toDate = (value: unknown): Date | null => {
+      if (!value) return null;
+      if (value instanceof Date) {
+        return value;
+      }
+      const date = new Date(String(value));
+      return Number.isNaN(date.getTime()) ? null : date;
+    };
+
+    const messageStatsMap = new Map<
+      string,
+      {
+        totalMessages: number;
+        mediaMessages: number;
+        conversationsTouched: number;
+        lastSentAt: Date | null;
+      }
+    >();
+    for (const stat of messagesByUser) {
+      if (!stat.userId) continue;
+      messageStatsMap.set(stat.userId, {
+        totalMessages: stat.totalMessages,
+        mediaMessages: stat.mediaMessages,
+        conversationsTouched: stat.conversationsTouched,
+        lastSentAt: toDate(stat.lastSentAt),
+      });
+    }
+
+    const conversationStatsMap = new Map<
+      string,
+      {
+        totalConversations: number;
+        lastCreatedAt: Date | null;
+      }
+    >();
+    for (const stat of conversationsByUser) {
+      if (!stat.userId) continue;
+      conversationStatsMap.set(stat.userId, {
+        totalConversations: stat.totalConversations,
+        lastCreatedAt: toDate(stat.lastCreatedAt),
+      });
+    }
+
+    const totalOutgoingMessages = outgoingCount?.count || 0;
+
+    const userStats = usersList.map((user) => {
+      const messageInfo = messageStatsMap.get(user.id);
+      const conversationInfo = conversationStatsMap.get(user.id);
+
+      const messagesSent = messageInfo?.totalMessages ?? 0;
+      const mediaSent = messageInfo?.mediaMessages ?? 0;
+      const conversationsCreated = conversationInfo?.totalConversations ?? 0;
+      const contactsEngaged = messageInfo?.conversationsTouched ?? 0;
+
+      const candidateDates = [
+        messageInfo?.lastSentAt ?? null,
+        conversationInfo?.lastCreatedAt ?? null,
+      ].filter((value): value is Date => value instanceof Date);
+
+      const lastActive =
+        candidateDates.length > 0
+          ? new Date(Math.max(...candidateDates.map((date) => date.getTime())))
+          : null;
+
+      const engagementRate =
+        totalOutgoingMessages > 0
+          ? Math.round((messagesSent / totalOutgoingMessages) * 1000) / 10
+          : 0;
+
+      const activityScore = messagesSent + conversationsCreated;
+
+      return {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        createdAt: user.createdAt,
+        messagesSent,
+        mediaSent,
+        conversationsCreated,
+        contactsEngaged,
+        lastActiveAt: lastActive ? lastActive.toISOString() : null,
+        engagementRate,
+        activityScore,
+      };
+    }).sort((a, b) => {
+      if (b.activityScore !== a.activityScore) {
+        return b.activityScore - a.activityScore;
+      }
+      return b.messagesSent - a.messagesSent;
+    });
+
     return {
       totals: {
         conversations: totalConversations?.count || 0,
         messages: totalMessages?.count || 0,
         incoming: incomingCount?.count || 0,
         outgoing: outgoingCount?.count || 0,
+        users: usersList.length,
       },
       topConversations,
       messagesByDay,
       recentActivity,
+      userStats,
     };
   }
 
@@ -469,87 +585,59 @@ export class DatabaseStorage implements IStorage {
     await db.delete(appSettings).where(eq(appSettings.key, "defaultWhatsappInstance"));
   }
 
-  private defaultCustomWebhookResponse(): CustomWebhookSettings {
+  private sanitizeWebhookPath(path: unknown): string {
+    const fallback = "/webhook/meta";
+    if (typeof path !== "string" || path.trim().length === 0) {
+      return fallback;
+    }
+
+    let normalized = path.trim();
+
+    if (!normalized.startsWith("/")) {
+      normalized = `/${normalized}`;
+    }
+
+    normalized = normalized.replace(/\/{2,}/g, "/");
+
+    if (normalized.length > 1 && normalized.endsWith("/")) {
+      normalized = normalized.replace(/\/+$/, "");
+    }
+
+    if (!normalized.startsWith("/webhook")) {
+      normalized = `/webhook${normalized === "/" ? "" : normalized}`;
+    }
+
+    return normalized || fallback;
+  }
+
+  private defaultMetaWebhookSettings(): MetaWebhookSettings {
     return {
-      routes: [
-        {
-          method: "GET",
-          path: "/webhook/meta",
-          response: {
-            status: 200,
-            body: "{{query.hub.challenge}}",
-          },
-        },
-        {
-          method: "POST",
-          path: "/webhook/custom",
-          response: {
-            status: 200,
-            body: "{{json body}}",
-          },
-        },
-      ],
+      path: "/webhook/meta",
       updatedAt: new Date().toISOString(),
     };
   }
 
-  private sanitizeRoute(route: any, fallback: CustomWebhookRouteConfig): CustomWebhookRouteConfig {
-    const method = route?.method === "POST" ? "POST" : "GET";
-    const path = typeof route?.path === "string" && route.path.trim().length > 0
-      ? route.path.trim()
-      : fallback.path;
-    const status = typeof route?.response?.status === "number"
-      ? route.response.status
-      : fallback.response.status;
-    const body = typeof route?.response?.body === "string"
-      ? route.response.body
-      : fallback.response.body;
+  async getMetaWebhookSettings(): Promise<MetaWebhookSettings> {
+    const stored = await this.getAppSetting("metaWebhookSettings");
+    const defaults = this.defaultMetaWebhookSettings();
 
-    return {
-      method,
-      path,
-      response: {
-        status,
-        body,
-      },
-    };
-  }
-
-  async getCustomWebhookResponse(): Promise<CustomWebhookSettings> {
-    const stored = await this.getAppSetting("customWebhookResponse");
-    const defaults = this.defaultCustomWebhookResponse();
-
-    if (!stored || !Array.isArray(stored.routes)) {
+    if (!stored || typeof stored.path !== "string") {
       return defaults;
     }
 
-    const routes = stored.routes.map((route: any) => {
-      const fallback = defaults.routes.find((r) => r.method === route?.method) || defaults.routes[0];
-      return this.sanitizeRoute(route, fallback);
-    });
-
     return {
-      routes: routes.length > 0 ? routes : defaults.routes,
+      path: this.sanitizeWebhookPath(stored.path),
       updatedAt: stored.updatedAt || defaults.updatedAt,
     };
   }
 
-  async setCustomWebhookResponse(routes: CustomWebhookRouteConfig[]): Promise<void> {
-    const defaults = this.defaultCustomWebhookResponse();
-    const sanitized = (routes || []).map((route, index) => {
-      const fallback =
-        defaults.routes.find((r) => r.method === route?.method) ||
-        defaults.routes[index] ||
-        defaults.routes[0];
-      return this.sanitizeRoute(route, fallback);
-    });
-
-    const payload: CustomWebhookSettings = {
-      routes: sanitized.length > 0 ? sanitized : defaults.routes,
+  async setMetaWebhookSettings(settings: MetaWebhookSettings): Promise<void> {
+    const payload: MetaWebhookSettings = {
+      path: this.sanitizeWebhookPath(settings.path),
       updatedAt: new Date().toISOString(),
     };
 
-    await this.setAppSetting("customWebhookResponse", payload);
+    await this.setAppSetting("metaWebhookSettings", payload);
   }
 
   // App settings (simple key/value JSON store)

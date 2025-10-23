@@ -30,6 +30,9 @@ export const conversations = pgTable("conversations", {
   phone: text("phone").notNull().unique(),
   displayName: text("display_name"),
   metadata: json("metadata"),
+  createdByUserId: varchar("created_by_user_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
   archived: boolean("archived").notNull().default(false),
   lastAt: timestamp("last_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -45,17 +48,28 @@ export const messages = pgTable("messages", {
   providerMessageId: text("provider_message_id"),
   status: text("status").notNull().default("received"),
   raw: json("raw"),
+  sentByUserId: varchar("sent_by_user_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
-export const conversationsRelations = relations(conversations, ({ many }) => ({
+export const conversationsRelations = relations(conversations, ({ many, one }) => ({
   messages: many(messages),
+  creator: one(users, {
+    fields: [conversations.createdByUserId],
+    references: [users.id],
+  }),
 }));
 
 export const messagesRelations = relations(messages, ({ one }) => ({
   conversation: one(conversations, {
     fields: [messages.conversationId],
     references: [conversations.id],
+  }),
+  sender: one(users, {
+    fields: [messages.sentByUserId],
+    references: [users.id],
   }),
 }));
 
@@ -86,11 +100,15 @@ export const insertConversationSchema = createInsertSchema(conversations).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+}).extend({
+  createdByUserId: z.string().uuid().optional().nullable(),
 });
 
 export const insertMessageSchema = createInsertSchema(messages).omit({
   id: true,
   createdAt: true,
+}).extend({
+  sentByUserId: z.string().uuid().optional().nullable(),
 });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;

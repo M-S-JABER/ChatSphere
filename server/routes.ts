@@ -1,4 +1,4 @@
-import type { Express, Request, Response } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import express from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
@@ -7,42 +7,6 @@ import path from "path";
 import { storage, type WhatsappInstanceConfig } from "./storage";
 import { MetaProvider } from "./providers/meta";
 import { WebhookDebugger } from "./debug-webhook";
-
-function resolvePath(source: any, path: string): any {
-  if (!source) return undefined;
-  return path.split(".").reduce((acc, key) => {
-    if (acc && typeof acc === "object" && key in acc) {
-      return acc[key];
-    }
-    return undefined;
-  }, source as any);
-}
-
-function renderTemplate(template: string, context: {
-  query: Record<string, any>;
-  body: any;
-  headers: Record<string, any>;
-}): string {
-  if (!template) return "";
-
-  let output = template;
-
-  output = output.replace(/{{\s*(query|body|headers)\.([^{}\s]+)\s*}}/g, (_, scope: string, path: string) => {
-    const value = resolvePath(scope === "query" ? context.query : scope === "body" ? context.body : context.headers, path);
-    return value !== undefined ? String(value) : "";
-  });
-
-  output = output.replace(/{{\s*json\s+(query|body|headers)\s*}}/g, (_, scope: string) => {
-    try {
-      const value = scope === "query" ? context.query : scope === "body" ? context.body : context.headers;
-      return JSON.stringify(value ?? {});
-    } catch {
-      return "";
-    }
-  });
-
-  return output;
-}
 
 function resolvePublicMediaUrl(req: Request, mediaPath: string): string {
   if (!mediaPath) {
@@ -193,6 +157,51 @@ function toInstanceResponse(instance: WhatsappInstanceConfig | null) {
 export async function registerRoutes(app: Express, requireAdmin: any): Promise<Server> {
   // Use persistent storage for webhook events and settings (no in-memory state)
 
+  const normalizeWebhookPath = (inputPath: string): string => {
+    const fallback = "/webhook/meta";
+    if (typeof inputPath !== "string" || inputPath.trim().length === 0) {
+      return fallback;
+    }
+
+    let normalized = inputPath.trim();
+
+    if (!normalized.startsWith("/")) {
+      normalized = `/${normalized}`;
+    }
+
+    normalized = normalized.replace(/\/{2,}/g, "/");
+
+    if (normalized.length > 1 && normalized.endsWith("/")) {
+      normalized = normalized.replace(/\/+$/, "");
+    }
+
+    if (!normalized.startsWith("/webhook")) {
+      normalized = `/webhook${normalized === "/" ? "" : normalized}`;
+    }
+
+    return normalized || fallback;
+  };
+
+  const normalizeForComparison = (value: string): string => {
+    if (!value) return "/";
+    let normalized = value.startsWith("/") ? value : `/${value}`;
+    normalized = normalized.replace(/\/{2,}/g, "/");
+    if (normalized.length > 1 && normalized.endsWith("/")) {
+      normalized = normalized.replace(/\/+$/, "");
+    }
+    return normalized || "/";
+  };
+
+  const metaWebhookSettings = await storage.getMetaWebhookSettings();
+  let metaWebhookPath = normalizeWebhookPath(metaWebhookSettings.path);
+
+  const pathsMatchMetaWebhook = (pathToCheck: string) =>
+    normalizeForComparison(pathToCheck) === normalizeForComparison(metaWebhookPath);
+
+  const updateMetaWebhookPath = (nextPath: string) => {
+    metaWebhookPath = normalizeWebhookPath(nextPath);
+  };
+
   // Admin endpoint to get/set API controls (persisted)
   app.get('/api/admin/api-controls', requireAdmin, async (req: Request, res: Response) => {
     const v = await storage.getAppSetting('apiControls');
@@ -207,21 +216,28 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
     res.json(current);
   });
 
-  app.get('/api/admin/custom-webhook', requireAdmin, async (_req: Request, res: Response) => {
+  app.get("/api/admin/webhook-config", requireAdmin, async (_req: Request, res: Response) => {
     try {
-      const config = await storage.getCustomWebhookResponse();
-      res.json({ config: config.routes });
+      const config = await storage.getMetaWebhookSettings();
+      res.json({ config });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
 
-  app.put('/api/admin/custom-webhook', requireAdmin, async (req: Request, res: Response) => {
+  app.put("/api/admin/webhook-config", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const routes = Array.isArray(req.body) ? req.body : [];
-      await storage.setCustomWebhookResponse(routes);
-      const updated = await storage.getCustomWebhookResponse();
-      res.json({ config: updated.routes });
+      const requestedPath = typeof req.body?.path === "string" ? req.body.path : "";
+      if (!requestedPath.trim()) {
+        return res.status(400).json({ error: "Path is required." });
+      }
+
+      const sanitizedPath = normalizeWebhookPath(requestedPath);
+      await storage.setMetaWebhookSettings({ path: sanitizedPath });
+      updateMetaWebhookPath(sanitizedPath);
+
+      const updated = await storage.getMetaWebhookSettings();
+      res.json({ config: updated });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -486,6 +502,7 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
         conversation = await storage.createConversation({
           phone: trimmedPhone,
           displayName: typeof displayName === "string" ? displayName.trim() || null : null,
+          createdByUserId: req.user?.id ?? null,
         });
       }
 
@@ -545,6 +562,7 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
       if (!conversation) {
         conversation = await storage.createConversation({ 
           phone: to,
+          createdByUserId: req.user?.id ?? null,
         });
       }
 
@@ -578,6 +596,7 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
         media: mediaMetadata,
         providerMessageId,
         status,
+        sentByUserId: req.user?.id ?? null,
       });
 
       await storage.updateConversationLastAt(conversation.id);
@@ -615,7 +634,7 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
   });
 
   // Meta webhook verification (GET request)
-  app.get("/webhook/meta", async (req: Request, res: Response) => {
+  const handleMetaWebhookVerification = async (req: Request, res: Response) => {
     const mode = req.query["hub.mode"];
     const challenge = req.query["hub.challenge"];
     const verifyToken = req.query["hub.verify_token"];
@@ -685,99 +704,11 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
       });
       res.status(500).send("Error");
     }
-  });
+  };
 
-  app.get("/webhook/custom", async (req: Request, res: Response) => {
-    try {
-      const settings = await storage.getCustomWebhookResponse();
-      const route =
-        settings.routes.find((r) => r.method === "GET") ?? {
-          method: "GET",
-          path: "/webhook/meta",
-          response: { status: 200, body: "{{query.hub.challenge}}" },
-        };
-
-      const body = renderTemplate(route.response.body, {
-        query: req.query as Record<string, any>,
-        body: null,
-        headers: req.headers as Record<string, any>,
-      });
-
-      try {
-        await storage.logWebhookEvent({
-          headers: req.headers,
-          query: req.query,
-          body: null,
-          response: {
-            webhook: route.path,
-            method: "GET",
-            status: route.response.status,
-            body,
-          },
-        });
-      } catch (logError) {
-        console.error("Failed to log custom GET webhook event:", logError);
-      }
-
-      res.status(route.response.status).type("text/plain").send(body);
-    } catch (error: any) {
-      console.error("Custom webhook GET error:", error);
-      res.status(500).send("Custom webhook error");
-    }
-  });
-
-  app.post("/webhook/custom", async (req: Request, res: Response) => {
-    try {
-      const settings = await storage.getCustomWebhookResponse();
-      const route =
-        settings.routes.find((r) => r.method === "POST") ?? {
-          method: "POST",
-          path: "/webhook/custom",
-          response: { status: 200, body: "{{json body}}" },
-        };
-
-      const templatedBody = renderTemplate(route.response.body, {
-        query: req.query as Record<string, any>,
-        body: req.body,
-        headers: req.headers as Record<string, any>,
-      });
-
-      let parsedBody: any = undefined;
-      try {
-        parsedBody = templatedBody ? JSON.parse(templatedBody) : {};
-      } catch {
-        parsedBody = undefined;
-      }
-
-      try {
-        await storage.logWebhookEvent({
-          headers: req.headers,
-          query: req.query,
-          body: req.body,
-          response: {
-            webhook: route.path,
-            method: "POST",
-            status: route.response.status,
-            body: parsedBody ?? templatedBody,
-          },
-        });
-      } catch (logError) {
-        console.error("Failed to log custom POST webhook event:", logError);
-      }
-
-      if (parsedBody !== undefined) {
-        return res.status(route.response.status).type("application/json").send(parsedBody);
-      }
-
-      res.status(route.response.status).type("text/plain").send(templatedBody);
-    } catch (error: any) {
-      console.error("Custom webhook POST error:", error);
-      res.status(500).json({ error: "Custom webhook error" });
-    }
-  });
 
   // Meta webhook for incoming messages (POST request)
-  app.post("/webhook/meta", async (req: Request, res: Response) => {
+  const handleMetaWebhookEvent = async (req: Request, res: Response) => {
     const startTime = Date.now();
     
     console.log(`🚀 Webhook POST received`);
@@ -886,6 +817,22 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
       
       res.status(500).json({ error: error.message });
     }
+  };
+
+  app.use(async (req: Request, res: Response, next: NextFunction) => {
+    if (!pathsMatchMetaWebhook(req.path)) {
+      return next();
+    }
+
+    if (req.method === "GET") {
+      return handleMetaWebhookVerification(req, res);
+    }
+
+    if (req.method === "POST") {
+      return handleMetaWebhookEvent(req, res);
+    }
+
+    return res.status(405).json({ error: "Method Not Allowed" });
   });
 
   // Debug webhook endpoint - for testing and debugging webhook issues

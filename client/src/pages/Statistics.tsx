@@ -16,6 +16,15 @@ import {
 } from "lucide-react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { format } from "date-fns";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 interface Statistics {
   totals: {
@@ -23,6 +32,7 @@ interface Statistics {
     messages: number;
     incoming: number;
     outgoing: number;
+    users?: number;
   };
   topConversations: Array<{
     phone: string;
@@ -42,6 +52,21 @@ interface Statistics {
     phone: string;
     displayName: string | null;
   }>;
+  userStats: UserStat[];
+}
+
+interface UserStat {
+  id: string;
+  username: string;
+  role: string;
+  createdAt: string;
+  messagesSent: number;
+  mediaSent: number;
+  conversationsCreated: number;
+  contactsEngaged: number;
+  lastActiveAt: string | null;
+  engagementRate: number;
+  activityScore: number;
 }
 
 export default function Statistics() {
@@ -77,6 +102,16 @@ export default function Statistics() {
     name: conv.displayName || conv.phone,
     messages: conv.messageCount,
   }));
+
+  const userStats = stats.userStats ?? [];
+  const totalUsers = stats.totals.users ?? userStats.length;
+
+  const formatLastActive = (value: string | null) => {
+    if (!value) return "No activity";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "No activity";
+    return format(date, "MMM dd, HH:mm");
+  };
 
   return (
     <div className="h-full overflow-y-auto">
@@ -228,6 +263,65 @@ export default function Statistics() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Team Engagement */}
+        <Card data-testid="card-user-stats">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Team Engagement Overview
+            </CardTitle>
+            <CardDescription>
+              {totalUsers} team member{totalUsers === 1 ? "" : "s"} with messaging activity insights
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {userStats.length > 0 ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>User</TableHead>
+                      <TableHead>Role</TableHead>
+                      <TableHead className="text-right">Messages Sent</TableHead>
+                      <TableHead className="text-right">Conversations Started</TableHead>
+                      <TableHead className="text-right">Contacts Engaged</TableHead>
+                      <TableHead className="text-right">Engagement</TableHead>
+                      <TableHead className="text-right">Activity Score</TableHead>
+                      <TableHead className="text-right">Last Active</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {userStats.map((user) => (
+                      <TableRow key={user.id}>
+                        <TableCell className="font-medium">{user.username}</TableCell>
+                        <TableCell>
+                          <Badge variant={user.role === "admin" ? "default" : "secondary"}>
+                            {user.role}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">{user.messagesSent}</TableCell>
+                        <TableCell className="text-right">{user.conversationsCreated}</TableCell>
+                        <TableCell className="text-right">{user.contactsEngaged}</TableCell>
+                        <TableCell className="text-right">
+                          {user.engagementRate.toFixed(1)}%
+                        </TableCell>
+                        <TableCell className="text-right">{user.activityScore}</TableCell>
+                        <TableCell className="text-right">
+                          {formatLastActive(user.lastActiveAt)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="text-center py-10 text-muted-foreground">
+                No user engagement data available yet
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Recent Activity */}
         <Card data-testid="card-recent-activity">
