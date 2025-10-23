@@ -4,3 +4,5 @@ dist
 .env
 .vscode
 uploads
+.gitgnore
+package-lock.json

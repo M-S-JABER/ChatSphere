@@ -96,9 +96,7 @@ export default function AuthPage() {
             <ul className="space-y-1 text-sm text-muted-foreground">
               <li>✓ Real-time message synchronization</li>
               <li>✓ Secure webhook endpoints</li>
-              <li>✓ Multi-provider support (Twilio & Meta)</li>
               <li>✓ Beautiful WhatsApp-inspired interface</li>
-              <li>✓ Role-based access control</li>
             </ul>
           </div>
         </div>
