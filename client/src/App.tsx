@@ -11,6 +11,7 @@ import Statistics from "@/pages/Statistics";
 import UserManagement from "@/pages/UserManagement";
 import AuthPage from "@/pages/AuthPage";
 import NotFound from "@/pages/not-found";
+import DragDropDemo from "@/pages/DragDropDemo";
 
 function Router() {
   return (
@@ -19,6 +20,7 @@ function Router() {
       <ProtectedRoute path="/settings" component={Settings} />
       <ProtectedRoute path="/statistics" component={Statistics} />
       <ProtectedRoute path="/users" component={UserManagement} />
+      <ProtectedRoute path="/demo/drag-drop" component={DragDropDemo} />
       <Route path="/auth" component={AuthPage} />
       <Route component={NotFound} />
     </Switch>

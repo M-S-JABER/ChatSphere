@@ -166,9 +166,11 @@ export default function Home() {
     },
   });
 
-  const handleSendMessage = (body: string, mediaUrl?: string) => {
-    if (!selectedConversation) return;
-    sendMessageMutation.mutate({
+  const handleSendMessage = async (body: string, mediaUrl?: string) => {
+    if (!selectedConversation) {
+      throw new Error("No conversation selected");
+    }
+    await sendMessageMutation.mutateAsync({
       to: selectedConversation.phone,
       body,
       mediaUrl,

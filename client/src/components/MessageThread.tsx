@@ -2,9 +2,11 @@ import { type Conversation, type Message } from "@shared/schema";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MoreVertical, Upload, Trash2 } from "lucide-react";
+import { MoreVertical, Trash2 } from "lucide-react";
 import { MessageBubble } from "./MessageBubble";
-import { MessageInput, type MessageInputHandle } from "./MessageInput";
+import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { ChatDropZone } from "./chat/ChatDropZone";
+import { type Attachment as ComposerAttachment } from "./chat/AttachmentBar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useEffect, useRef, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -23,7 +25,7 @@ import {
 interface MessageThreadProps {
   conversation: Conversation | null;
   messages: Message[];
-  onSendMessage: (body: string, mediaUrl?: string) => void;
+  onSendMessage: (body: string, mediaUrl?: string) => Promise<void> | void;
   isLoading?: boolean;
   isSending?: boolean;
   canManageMessages?: boolean;
@@ -47,14 +49,12 @@ export function MessageThread({
   onDeleteConversation,
   isDeletingConversation,
 }: MessageThreadProps) {
-  const [isDragging, setIsDragging] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const [messagePendingDeletion, setMessagePendingDeletion] = useState<Message | null>(null);
   const [deleteConversationOpen, setDeleteConversationOpen] = useState(false);
-  const messageInputRef = useRef<MessageInputHandle>(null);
-  const [dragContentType, setDragContentType] = useState<"file" | "text" | null>(null);
+  const composerRef = useRef<ChatComposerHandle>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -64,53 +64,67 @@ export function MessageThread({
     scrollToBottom();
   }, [messages]);
 
-  const handleDragOver = (e: React.DragEvent) => {
-    const types = Array.from(e.dataTransfer.types ?? []);
-    const hasFile = types.includes("Files");
-    const hasText = types.includes("text/plain") || types.includes("text/uri-list") || types.includes("text/html");
-
-    if (!hasFile && !hasText) {
-      return;
-    }
-
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = "copy";
-    setDragContentType(hasFile ? "file" : "text");
-    setIsDragging(true);
+  const handleDropFiles = (files: File[]) => {
+    if (!files.length) return;
+    composerRef.current?.addAttachments(files);
   };
 
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-    setDragContentType(null);
+  const handleDropText = (text: string) => {
+    if (!text) return;
+    composerRef.current?.insertText(text);
+    toast({
+      title: "Text added",
+      description: "Dropped text has been inserted into the message box.",
+    });
   };
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-    setDragContentType(null);
+  const uploadAttachment = async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
 
-    const files = Array.from(e.dataTransfer.files ?? []);
+    const response = await fetch("/api/upload", {
+      method: "POST",
+      body: formData,
+      credentials: "include",
+    });
 
-    if (files.length > 0) {
-      messageInputRef.current?.attachFile(files[0]);
-      return;
+    if (!response.ok) {
+      throw new Error(await response.text());
     }
 
-    const textPayload =
-      e.dataTransfer.getData("text/plain") ||
-      e.dataTransfer.getData("text/uri-list") ||
-      e.dataTransfer.getData("text");
+    const data = await response.json();
+    return data.publicUrl ?? data.url;
+  };
 
-    if (textPayload) {
-      messageInputRef.current?.insertText(textPayload);
-      toast({
-        title: "Text added",
-        description: "Dropped text has been inserted into the message box.",
-      });
+  const handleComposerSend = async ({
+    text,
+    attachments: composerAttachments,
+  }: {
+    text: string;
+    attachments: ComposerAttachment[];
+  }) => {
+    if (!conversation) {
+      throw new Error("No conversation selected");
+    }
+
+    const trimmed = text.trim();
+
+    if (trimmed) {
+      await Promise.resolve(onSendMessage(trimmed, undefined));
+    }
+
+    for (const attachment of composerAttachments) {
+      try {
+        const mediaUrl = await uploadAttachment(attachment.file);
+        await Promise.resolve(onSendMessage("", mediaUrl));
+      } catch (error: any) {
+        toast({
+          title: "Upload failed",
+          description: error?.message ?? "Unable to upload attachment.",
+          variant: "destructive",
+        });
+        throw error;
+      }
     }
   };
 
@@ -248,70 +262,59 @@ export function MessageThread({
         </div>
       </div>
 
-      <div
-        className="flex-1 overflow-y-auto p-4 bg-background relative"
-        style={{
-          backgroundImage: `repeating-linear-gradient(
-            45deg,
-            transparent,
-            transparent 10px,
-            hsl(var(--border) / 0.03) 10px,
-            hsl(var(--border) / 0.03) 11px
-          )`,
-        }}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
+      <ChatDropZone
+        onDropFiles={handleDropFiles}
+        onDropText={handleDropText}
+        disabled={!conversation}
+        className="flex flex-1 flex-col"
       >
-        {isDragging && (
-          <div className="absolute inset-0 bg-primary/10 border-4 border-dashed border-primary rounded-lg flex items-center justify-center z-50 backdrop-blur-sm">
-            <div className="flex flex-col items-center gap-4">
-              <div className="w-20 h-20 rounded-full bg-primary/20 flex items-center justify-center">
-                <Upload className="h-10 w-10 text-primary" />
+        <div
+          className="flex-1 overflow-y-auto p-4 bg-background relative"
+          style={{
+            backgroundImage: `repeating-linear-gradient(
+              45deg,
+              transparent,
+              transparent 10px,
+              hsl(var(--border) / 0.03) 10px,
+              hsl(var(--border) / 0.03) 11px
+            )`,
+          }}
+        >
+          <ScrollArea className="h-full" ref={scrollRef}>
+            {messages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-center py-16">
+                <div className="w-16 h-16 rounded-full bg-card flex items-center justify-center mb-4 shadow-sm">
+                  <svg viewBox="0 0 24 24" className="w-8 h-8 text-primary" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" />
+                  </svg>
+                </div>
+                <p className="text-sm text-muted-foreground mb-1">No messages yet</p>
+                <p className="text-xs text-muted-foreground">Start the conversation by sending a message</p>
               </div>
-              <p className="text-lg font-medium text-primary">
-                {dragContentType === "text" ? "Drop text to insert" : "Drop files to attach"}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {dragContentType === "text"
-                  ? "The dropped text will appear in the message box."
-                  : "Images, videos, audio, and PDFs up to 10MB are supported."}
-              </p>
-            </div>
-          </div>
-        )}
-
-        <ScrollArea className="h-full" ref={scrollRef}>
-          {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center py-16">
-              <div className="w-16 h-16 rounded-full bg-card flex items-center justify-center mb-4 shadow-sm">
-                <svg viewBox="0 0 24 24" className="w-8 h-8 text-primary" fill="currentColor">
-                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" />
-                </svg>
+            ) : (
+              <div className="space-y-2">
+                {messages.map((message) => (
+                  <MessageBubble
+                    key={message.id}
+                    message={message}
+                    canDelete={allowMessageDeletion}
+                    onDelete={allowMessageDeletion ? () => setMessagePendingDeletion(message) : undefined}
+                    isDeleting={Boolean(
+                      allowMessageDeletion && isDeletingMessage && deletingMessageId === message.id
+                    )}
+                  />
+                ))}
+                <div ref={messagesEndRef} />
               </div>
-              <p className="text-sm text-muted-foreground mb-1">No messages yet</p>
-              <p className="text-xs text-muted-foreground">Start the conversation by sending a message</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {messages.map((message) => (
-                <MessageBubble
-                  key={message.id}
-                  message={message}
-                  canDelete={allowMessageDeletion}
-                  onDelete={allowMessageDeletion ? () => setMessagePendingDeletion(message) : undefined}
-                  isDeleting={Boolean(
-                    allowMessageDeletion && isDeletingMessage && deletingMessageId === message.id
-                  )}
-                />
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </ScrollArea>
-      </div>
-
-      <MessageInput ref={messageInputRef} onSend={onSendMessage} disabled={isSending} />
+            )}
+          </ScrollArea>
+        </div>
+        <ChatComposer
+          ref={composerRef}
+          onSend={handleComposerSend}
+          disabled={isSending || !conversation}
+        />
+      </ChatDropZone>
 
       <AlertDialog
         open={!!messagePendingDeletion}
