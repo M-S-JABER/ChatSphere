@@ -237,7 +237,7 @@ echo $META_VERIFY_TOKEN
 echo $META_APP_SECRET
 
 # حالة الخادم
-curl http://10.255.255.254:5000/health
+curl http://127.0.0.1:8080/health
 ```
 
 ### 8. 🆘 طلب المساعدة
