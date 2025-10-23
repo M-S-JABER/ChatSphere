@@ -20,7 +20,7 @@
             "server": "localhost",
             "port": 5432,
             "driver": "PostgreSQL",
-            "name": "postgres",
+            "name": "whatsapp_chat",
             "database": "postgres",
             "username": "postgres",
             "password": "Ancir2025"
