@@ -9,7 +9,15 @@ import {
 } from "@/components/ui/dialog";
 import { formatBytes, isImage } from "@/lib/attachmentUtils";
 import { cn } from "@/lib/utils";
-import { Eye, FileText, Paperclip, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, Eye, FileText, Loader2, Paperclip, X } from "lucide-react";
+
+export type AttachmentUploadStatus = "pending" | "uploading" | "success" | "error";
+
+export type AttachmentUploadState = {
+  status: AttachmentUploadStatus;
+  progress: number;
+  error?: string;
+};
 
 export type Attachment = {
   id: string;
@@ -19,6 +27,7 @@ export type Attachment = {
   mime: string;
   size: number;
   previewUrl?: string;
+  uploadState?: AttachmentUploadState;
 };
 
 export type AttachmentBarProps = {
@@ -38,6 +47,23 @@ type PreviewState =
 
 const MAX_PREVIEW_CHARS = 2000;
 
+const readFileAsText = (file: File): Promise<string> => {
+  if (typeof file.text === "function") {
+    return file.text();
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      resolve(typeof reader.result === "string" ? reader.result : "");
+    };
+    reader.onerror = () => {
+      reject(reader.error ?? new Error("Unable to read file."));
+    };
+    reader.readAsText(file);
+  });
+};
+
 const isPreviewableText = (attachment: Attachment) => {
   const mime = attachment.mime;
   if (mime.startsWith("text/")) return true;
@@ -56,7 +82,7 @@ export function AttachmentBar({ attachments, onRemove }: AttachmentBarProps) {
     setPreviewState({ attachment, content: null, loading: true, open: true });
 
     try {
-      const text = await attachment.file.text();
+      const text = await readFileAsText(attachment.file);
       const content = text.slice(0, MAX_PREVIEW_CHARS);
       setPreviewState((prev) =>
         prev.open && prev.attachment.id === attachment.id
@@ -87,13 +113,24 @@ export function AttachmentBar({ attachments, onRemove }: AttachmentBarProps) {
       <div className="flex flex-wrap gap-2">
         {attachments.map((attachment) => {
           const isImg = isImage(attachment.mime) || attachment.kind === "image";
+          const uploadState: AttachmentUploadState = attachment.uploadState ?? {
+            status: "pending",
+            progress: 0,
+          };
+          const isUploading = uploadState.status === "uploading";
+          const isSuccess = uploadState.status === "success";
+          const isError = uploadState.status === "error";
 
           return (
             <div
               key={attachment.id}
               className={cn(
-                "group relative flex min-w-[220px] items-center gap-3 rounded-xl border border-border/60 bg-card/70 px-3 py-2 shadow-sm",
+                "group relative flex min-w-[220px] items-center gap-3 rounded-xl border bg-card/70 px-3 py-2 shadow-sm",
                 "focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2",
+                "border-border/60",
+                isUploading && "border-primary/40",
+                isSuccess && "border-emerald-400/60 bg-emerald-50/60 dark:bg-emerald-500/10",
+                isError && "border-destructive/60 bg-destructive/10",
               )}
             >
               {isImg ? (
@@ -121,6 +158,39 @@ export function AttachmentBar({ attachments, onRemove }: AttachmentBarProps) {
                   {attachment.name}
                 </p>
                 <p className="text-xs text-muted-foreground">{formatBytes(attachment.size)}</p>
+                <div
+                  className={cn(
+                    "mt-1 flex items-center gap-1 text-xs",
+                    isError
+                      ? "text-destructive"
+                      : isSuccess
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-muted-foreground",
+                  )}
+                  aria-live="polite"
+                >
+                  {isUploading && (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                      <span>Uploading {uploadState.progress}%</span>
+                    </>
+                  )}
+                  {isSuccess && (
+                    <>
+                      <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+                      <span>Sent</span>
+                    </>
+                  )}
+                  {isError && (
+                    <>
+                      <AlertCircle className="h-3.5 w-3.5" aria-hidden />
+                      <span>{uploadState.error ?? "Upload failed"}</span>
+                    </>
+                  )}
+                  {!isUploading && !isSuccess && !isError && (
+                    <span className="text-muted-foreground">Ready to send</span>
+                  )}
+                </div>
               </div>
 
               {isPreviewableText(attachment) && (
@@ -147,6 +217,15 @@ export function AttachmentBar({ attachments, onRemove }: AttachmentBarProps) {
               >
                 <X className="h-4 w-4" />
               </Button>
+
+              {isUploading && (
+                <div className="absolute inset-x-0 bottom-0 h-1 rounded-b-xl bg-primary/15">
+                  <div
+                    className="h-full rounded-b-xl bg-primary transition-[width]"
+                    style={{ width: `${Math.min(Math.max(uploadState.progress, 0), 100)}%` }}
+                  />
+                </div>
+              )}
             </div>
           );
         })}

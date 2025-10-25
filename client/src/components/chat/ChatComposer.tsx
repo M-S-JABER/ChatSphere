@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Attachment, AttachmentBar } from "./AttachmentBar";
+import { Attachment, AttachmentBar, type AttachmentUploadState } from "./AttachmentBar";
 import {
   DEFAULT_ACCEPTED_TYPES,
   validateFiles,
@@ -21,6 +21,14 @@ import { Smile, Paperclip, Send, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type ComposerAttachment = Attachment;
+type UpdateAttachmentUploadState = (id: string, state: Partial<AttachmentUploadState>) => void;
+
+export type ChatComposerSendPayload = {
+  text: string;
+  attachments: ComposerAttachment[];
+  replyToMessageId?: string;
+  setAttachmentUploadState: UpdateAttachmentUploadState;
+};
 
 type ReplyContext = {
   id: string;
@@ -29,11 +37,7 @@ type ReplyContext = {
 };
 
 export type ChatComposerProps = {
-  onSend: (payload: {
-    text: string;
-    attachments: ComposerAttachment[];
-    replyToMessageId?: string;
-  }) => Promise<void> | void;
+  onSend: (payload: ChatComposerSendPayload) => Promise<void> | void;
   maxFiles?: number;
   maxFileSizeMB?: number;
   acceptedTypes?: ReadonlyArray<string>;
@@ -49,10 +53,11 @@ export interface ChatComposerHandle {
   removeAttachment: (id: string) => void;
   clearAttachments: () => void;
   insertText: (text: string) => void;
+  setAttachmentUploadState: UpdateAttachmentUploadState;
 }
 
 const DEFAULT_MAX_FILES = 10;
-const DEFAULT_MAX_FILE_SIZE_MB = 25;
+const DEFAULT_MAX_FILE_SIZE_MB = 100;
 
 const createAttachment = (file: File): ComposerAttachment => {
   const mime = file.type || "application/octet-stream";
@@ -66,6 +71,10 @@ const createAttachment = (file: File): ComposerAttachment => {
     mime,
     size: file.size,
     previewUrl,
+    uploadState: {
+      status: "pending",
+      progress: 0,
+    },
   };
 };
 
@@ -92,11 +101,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectionRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
   const attachmentsRef = useRef<ComposerAttachment[]>(attachments);
+  const clearTimerRef = useRef<number | null>(null);
 
   const updateSelection = useCallback(() => {
     const el = textareaRef.current;
@@ -177,10 +187,47 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
   }, []);
 
   const clearAttachments = useCallback(() => {
+    if (clearTimerRef.current !== null) {
+      window.clearTimeout(clearTimerRef.current);
+      clearTimerRef.current = null;
+    }
+
     setAttachments((prev) => {
       prev.forEach(revokeAttachmentUrl);
       return [];
     });
+  }, []);
+
+  const setAttachmentUploadState = useCallback<UpdateAttachmentUploadState>((id, state) => {
+    setAttachments((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) {
+          return item;
+        }
+
+        const previousState = item.uploadState ?? { status: "pending", progress: 0 };
+        const nextStatus = state.status ?? previousState.status;
+        let nextProgress =
+          state.progress !== undefined ? Math.max(0, Math.min(100, state.progress)) : previousState.progress;
+
+        if (nextStatus === "success" && state.progress === undefined) {
+          nextProgress = 100;
+        }
+
+        const nextError =
+          state.error ??
+          (nextStatus === "error" ? previousState.error ?? "Upload failed." : undefined);
+
+        return {
+          ...item,
+          uploadState: {
+            status: nextStatus,
+            progress: nextProgress,
+            error: nextError,
+          },
+        };
+      }),
+    );
   }, []);
 
   useImperativeHandle(
@@ -191,8 +238,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
       removeAttachment,
       clearAttachments,
       insertText: insertTextAtCursor,
+      setAttachmentUploadState,
     }),
-    [attachments, addAttachments, clearAttachments, insertTextAtCursor, removeAttachment],
+    [attachments, addAttachments, clearAttachments, insertTextAtCursor, removeAttachment, setAttachmentUploadState],
   );
 
   useEffect(() => {
@@ -202,6 +250,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
   useEffect(() => {
     return () => {
       attachmentsRef.current.forEach(revokeAttachmentUrl);
+      if (clearTimerRef.current !== null) {
+        window.clearTimeout(clearTimerRef.current);
+      }
     };
   }, []);
 
@@ -262,29 +313,45 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
 
   const handleSend = async () => {
     const trimmed = message.trim();
-    if ((trimmed.length === 0 && attachments.length === 0) || disabled || isSubmitting) {
+    if ((trimmed.length === 0 && attachments.length === 0) || disabled || isSending) {
       return;
     }
 
     setErrors([]);
-    setIsSubmitting(true);
+    setIsSending(true);
     try {
       await onSend({
         text: trimmed,
         attachments,
         replyToMessageId: replyTo?.id,
+        setAttachmentUploadState,
       });
       setMessage("");
-      clearAttachments();
       onClearReply?.();
+
+      const snapshot = attachmentsRef.current;
+      const shouldClear =
+        snapshot.length === 0 ||
+        snapshot.every((item) => item.uploadState?.status === "success");
+
+      if (shouldClear) {
+        const delay = snapshot.length > 0 ? 600 : 0;
+        if (clearTimerRef.current !== null) {
+          window.clearTimeout(clearTimerRef.current);
+        }
+        clearTimerRef.current = window.setTimeout(() => {
+          clearAttachments();
+          clearTimerRef.current = null;
+        }, delay);
+      }
     } finally {
-      setIsSubmitting(false);
+      setIsSending(false);
     }
   };
 
   const isSendDisabled =
     disabled ||
-    isSubmitting ||
+    isSending ||
     (message.trim().length === 0 && attachments.length === 0);
 
   return (
@@ -340,7 +407,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
               variant="ghost"
               type="button"
               className="flex-shrink-0"
-              disabled={disabled || isSubmitting}
+              disabled={disabled}
               aria-label="Insert emoji"
             >
               <Smile className="h-6 w-6" />
@@ -373,7 +440,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
           type="button"
           className="flex-shrink-0"
           onClick={() => fileInputRef.current?.click()}
-          disabled={disabled || isSubmitting || attachments.length >= maxFiles}
+          disabled={disabled || attachments.length >= maxFiles}
           aria-label="Attach files"
         >
           <Paperclip className="h-6 w-6" />
@@ -387,13 +454,19 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
               setMessage(event.target.value);
               requestAnimationFrame(updateSelection);
             }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                handleSend();
+              }
+            }}
             onSelect={updateSelection}
             onKeyUp={updateSelection}
             onClick={updateSelection}
             onPaste={handlePaste}
             onDrop={handleDrop}
             placeholder="Type a message"
-            disabled={disabled || isSubmitting}
+            disabled={disabled}
             rows={1}
             className="min-h-[48px] max-h-[160px] resize-none rounded-lg border-none bg-secondary pr-12"
           />

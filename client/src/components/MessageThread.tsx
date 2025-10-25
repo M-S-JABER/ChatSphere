@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MoreVertical, Trash2 } from "lucide-react";
 import { MessageBubble } from "./MessageBubble";
-import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { ChatComposer, type ChatComposerHandle, type ChatComposerSendPayload } from "./chat/ChatComposer";
 import { ChatDropZone } from "./chat/ChatDropZone";
 import type { Attachment as ComposerAttachment } from "./chat/AttachmentBar";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,6 +22,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { uploadFile } from "@/lib/uploadService";
 
 interface MessageThreadProps {
   conversation: Conversation | null;
@@ -98,33 +99,12 @@ export function MessageThread({
     });
   };
 
-  const uploadAttachment = async (file: File) => {
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const response = await fetch("/api/upload", {
-      method: "POST",
-      body: formData,
-      credentials: "include",
-    });
-
-    if (!response.ok) {
-      throw new Error(await response.text());
-    }
-
-    const data = await response.json();
-    return data.publicUrl ?? data.url;
-  };
-
   const handleComposerSend = async ({
     text,
     attachments: composerAttachments,
     replyToMessageId,
-  }: {
-    text: string;
-    attachments: ComposerAttachment[];
-    replyToMessageId?: string;
-  }) => {
+    setAttachmentUploadState,
+  }: ChatComposerSendPayload) => {
     if (!conversation) {
       throw new Error("No conversation selected");
     }
@@ -138,8 +118,39 @@ export function MessageThread({
       }
 
       for (const attachment of composerAttachments) {
-        const mediaUrl = await uploadAttachment(attachment.file);
-        await Promise.resolve(onSendMessage("", mediaUrl, effectiveReplyId));
+        setAttachmentUploadState(attachment.id, {
+          status: "uploading",
+          progress: 0,
+          error: undefined,
+        });
+
+        try {
+          const response = await uploadFile(attachment.file, {
+            onProgress: (progress) => {
+              setAttachmentUploadState(attachment.id, {
+                status: "uploading",
+                progress,
+                error: undefined,
+              });
+            },
+          });
+
+          const mediaUrl = response.publicUrl ?? response.url;
+          await Promise.resolve(onSendMessage("", mediaUrl, effectiveReplyId));
+          setAttachmentUploadState(attachment.id, {
+            status: "success",
+            progress: 100,
+            error: undefined,
+          });
+        } catch (error: any) {
+          const message = error?.message ?? "Unable to upload attachment.";
+          setAttachmentUploadState(attachment.id, {
+            status: "error",
+            error: message,
+            progress: 0,
+          });
+          throw error instanceof Error ? error : new Error(message);
+        }
       }
 
       setReplyContext(null);

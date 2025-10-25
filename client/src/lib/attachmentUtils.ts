@@ -51,7 +51,7 @@ export function isImage(mime: string): boolean {
 
 export function validateFiles(files: File[], options: ValidateFilesOptions = {}): ValidationResult {
   const acceptedTypes = options.acceptedTypes ?? DEFAULT_ACCEPTED_TYPES;
-  const maxFileSizeMB = options.maxFileSizeMB ?? 25;
+  const maxFileSizeMB = options.maxFileSizeMB ?? 100;
   const maxFiles = options.maxFiles ?? 10;
   const currentCount = options.currentCount ?? 0;
 
@@ -70,7 +70,7 @@ export function validateFiles(files: File[], options: ValidateFilesOptions = {})
     }
 
     const mime = file.type || "";
-  const sizeInMB = file.size / BYTES_PER_MB;
+    const sizeInMB = file.size / BYTES_PER_MB;
 
     if (sizeInMB > maxFileSizeMB) {
       rejected.push({
