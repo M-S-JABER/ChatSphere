@@ -1,15 +1,10 @@
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import * as schema from '@shared/schema';
-
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?",
-  );
-}
+import { env } from '../validate-env';
 
 // Use node-postgres Pool for direct Postgres connections (suits local/remote Postgres on tcp:5432).
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+export const pool = new Pool({ connectionString: env.DATABASE_URL });
 export const db = drizzle(pool);
 
 export async function ensureSchema(): Promise<void> {
@@ -17,6 +12,7 @@ export async function ensureSchema(): Promise<void> {
   // Use simple SQL commands with IF NOT EXISTS to be idempotent.
   const client = await pool.connect();
   try {
+    await client.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto";');
     await client.query('BEGIN');
 
     // app_settings

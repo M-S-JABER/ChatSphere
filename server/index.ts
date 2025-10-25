@@ -1,9 +1,12 @@
 import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
-import { setupAuth } from "./auth";
-import { setupVite, serveStatic, log } from "./vite";
 import { mkdirSync } from "fs";
 import { join } from "path";
+import { env } from "../validate-env";
+import { registerRoutes } from "./routes";
+import { setupAuth } from "./auth";
+import { setupVite, serveStatic } from "./vite";
+import { httpLogger, logger } from "./logger";
+import { registerHealthRoute } from "./health";
 
 // Ensure uploads directory exists
 try {
@@ -14,12 +17,13 @@ try {
 
 const app = express();
 
-app.set("trust proxy", true);
+process.env.NODE_ENV = env.NODE_ENV;
+app.set("env", env.NODE_ENV);
 
-const enforceHttps =
-  typeof process.env.ENFORCE_HTTPS === "string"
-    ? process.env.ENFORCE_HTTPS.toLowerCase() === "true"
-    : false;
+app.set("trust proxy", true);
+app.use(httpLogger);
+
+const enforceHttps = env.ENFORCE_HTTPS ?? false;
 
 if (enforceHttps) {
   app.use((req, res, next) => {
@@ -58,6 +62,8 @@ app.use(express.urlencoded({
   }
 }));
 
+registerHealthRoute(app);
+
 const { requireAdmin } = setupAuth(app);
 
 app.use((req, res, next) => {
@@ -74,16 +80,22 @@ app.use((req, res, next) => {
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
+      const responsePreview = capturedJsonResponse
+        ? JSON.stringify(capturedJsonResponse).slice(0, 200)
+        : undefined;
 
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
-
-      log(logLine);
+      logger.info(
+        {
+          event: "api_request_completed",
+          requestId: res.getHeader("x-request-id") ?? undefined,
+          method: req.method,
+          path,
+          statusCode: res.statusCode,
+          durationMs: duration,
+          responsePreview,
+        },
+        "API request completed",
+      );
     }
   });
 
@@ -118,7 +130,7 @@ app.use((req, res, next) => {
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
+  if (env.NODE_ENV === "development") {
     await setupVite(app, server);
   } else {
     serveStatic(app);
@@ -128,12 +140,16 @@ app.use((req, res, next) => {
   // Other ports are firewalled. Default to 5000 if not specified.
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || '5000', 10);
+  const port = env.PORT;
+  const host = env.HOST ?? "0.0.0.0";
   server.listen({
     port,
-    host: "0.0.0.0",
+    host,
     reusePort: true,
   }, () => {
-    log(`serving on port ${port}`);
+    logger.info(
+      { event: "server_started", port, host },
+      `Serving on http://${host}:${port}`,
+    );
   });
 })();
