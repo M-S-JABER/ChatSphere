@@ -1,8 +1,41 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, json, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, json, boolean, primaryKey } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+
+export type MediaProcessingStatus = "pending" | "processing" | "ready" | "failed";
+
+export type MessageMedia = {
+  origin: "whatsapp" | "upload" | "system" | "unknown";
+  type: "image" | "video" | "audio" | "document" | "unknown";
+  status: MediaProcessingStatus;
+  provider?: "meta" | string | null;
+  providerMediaId?: string | null;
+  mimeType?: string | null;
+  filename?: string | null;
+  extension?: string | null;
+  sizeBytes?: number | null;
+  checksum?: string | null;
+  width?: number | null;
+  height?: number | null;
+  durationSeconds?: number | null;
+  pageCount?: number | null;
+  url?: string | null;
+  thumbnailUrl?: string | null;
+  previewUrl?: string | null;
+  placeholderUrl?: string | null;
+  storage?: {
+    originalPath?: string | null;
+    thumbnailPath?: string | null;
+    previewPath?: string | null;
+  } | null;
+  downloadAttempts?: number | null;
+  downloadError?: string | null;
+  downloadedAt?: string | null;
+  thumbnailGeneratedAt?: string | null;
+  metadata?: Record<string, any> | null;
+};
 
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -44,7 +77,7 @@ export const messages = pgTable("messages", {
   conversationId: varchar("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
   direction: text("direction").notNull(),
   body: text("body"),
-  media: json("media").$type<{ url: string; filename?: string } | null>(),
+  media: json("media").$type<MessageMedia | null>(),
   providerMessageId: text("provider_message_id"),
   status: text("status").notNull().default("received"),
   raw: json("raw"),
@@ -164,6 +197,35 @@ export const webhookEventsRelations = relations(webhookEvents, ({ one }) => ({
     references: [webhooks.id],
   }),
 }));
+
+export const conversationPins = pgTable(
+  "conversation_pins",
+  {
+    userId: varchar("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: varchar("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    pinnedAt: timestamp("pinned_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.conversationId] }),
+  }),
+);
+
+export const conversationPinsRelations = relations(conversationPins, ({ one }) => ({
+  user: one(users, {
+    fields: [conversationPins.userId],
+    references: [users.id],
+  }),
+  conversation: one(conversations, {
+    fields: [conversationPins.conversationId],
+    references: [conversations.id],
+  }),
+}));
+
+export type ConversationPin = typeof conversationPins.$inferSelect;
 
 export const insertWebhookSchema = createInsertSchema(webhooks).omit({
   id: true,

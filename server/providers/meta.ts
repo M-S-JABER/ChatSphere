@@ -1,4 +1,10 @@
-import { IWhatsAppProvider, SendMessageResponse, IncomingMessageEvent } from "./base";
+import {
+  IWhatsAppProvider,
+  SendMessageResponse,
+  IncomingMessageEvent,
+  IncomingMediaDescriptor,
+  IncomingMediaType,
+} from "./base";
 import crypto from "crypto";
 import path from "path";
 
@@ -7,17 +13,20 @@ export class MetaProvider implements IWhatsAppProvider {
   private phoneNumberId: string;
   private verifyToken: string;
   private appSecret: string;
+  private graphVersion: string;
 
   constructor(
     token?: string,
     phoneNumberId?: string,
     verifyToken?: string,
-    appSecret?: string
+    appSecret?: string,
+    graphVersion?: string,
   ) {
     this.token = token || process.env.META_TOKEN || "";
     this.phoneNumberId = phoneNumberId || process.env.META_PHONE_NUMBER_ID || "";
     this.verifyToken = verifyToken || process.env.META_VERIFY_TOKEN || "";
     this.appSecret = appSecret || process.env.META_APP_SECRET || "";
+    this.graphVersion = graphVersion || process.env.META_GRAPH_VERSION || "v19.0";
 
     if (!this.token || !this.phoneNumberId) {
       console.warn("Meta credentials not configured. Sending messages will fail.");
@@ -91,15 +100,15 @@ export class MetaProvider implements IWhatsAppProvider {
     }
 
     const response = await fetch(
-      `https://graph.facebook.com/v17.0/${this.phoneNumberId}/messages`,
+      `https://graph.facebook.com/${this.graphVersion}/${this.phoneNumberId}/messages`,
       {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${this.token}`,
+          Authorization: `Bearer ${this.token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(messagePayload),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -175,33 +184,37 @@ export class MetaProvider implements IWhatsAppProvider {
           for (const msg of change.value.messages) {
             console.log('📨 MetaProvider.parseIncoming - Processing message:', JSON.stringify(msg, null, 2));
             
+            const timestampSeconds = Number(msg.timestamp);
+            const timestampIso = Number.isFinite(timestampSeconds)
+              ? new Date(timestampSeconds * 1000).toISOString()
+              : new Date().toISOString();
+
             const event: IncomingMessageEvent = {
               from: msg.from,
               raw: msg,
+              providerMessageId: msg.id,
+              timestamp: timestampIso,
             };
 
             if (msg.type === "text") {
               event.body = msg.text?.body;
               console.log(`📝 MetaProvider.parseIncoming - Text message from ${msg.from}: ${event.body}`);
             } else if (msg.type === "image") {
-              event.media = { url: msg.image?.link || msg.image?.id };
-              event.body = msg.image?.caption;
+              event.media = this.buildMediaDescriptor("image", msg.image);
+              event.body = msg.image?.caption ?? msg.caption;
               console.log(`🖼️ MetaProvider.parseIncoming - Image message from ${msg.from}: ${event.body || 'No caption'}`);
             } else if (msg.type === "document") {
-              event.media = {
-                url: msg.document?.link || msg.document?.id,
-                filename: msg.document?.filename,
-              };
-              event.body = msg.document?.caption;
+              event.media = this.buildMediaDescriptor("document", msg.document);
+              event.body = msg.document?.caption ?? msg.caption;
               console.log(
                 `📄 MetaProvider.parseIncoming - Document message from ${msg.from}: ${msg.document?.filename || 'No filename'}`
               );
             } else if (msg.type === "video") {
-              event.media = { url: msg.video?.link || msg.video?.id };
-              event.body = msg.video?.caption;
+              event.media = this.buildMediaDescriptor("video", msg.video);
+              event.body = msg.video?.caption ?? msg.caption;
               console.log(`🎬 MetaProvider.parseIncoming - Video message from ${msg.from}`);
             } else if (msg.type === "audio") {
-              event.media = { url: msg.audio?.link || msg.audio?.id };
+              event.media = this.buildMediaDescriptor("audio", msg.audio);
               console.log(`🎵 MetaProvider.parseIncoming - Audio message from ${msg.from}`);
             } else {
               console.log(`❓ MetaProvider.parseIncoming - Unknown message type: ${msg.type}`);
@@ -218,4 +231,94 @@ export class MetaProvider implements IWhatsAppProvider {
     console.log(`✅ MetaProvider.parseIncoming - Parsed ${events.length} events`);
     return events;
   }
+
+  getAccessToken(): string {
+    return this.token;
+  }
+
+  getGraphVersion(): string {
+    return this.graphVersion;
+  }
+
+  async fetchMediaMetadata(mediaId: string): Promise<MetaMediaMetadata> {
+    if (!this.token) {
+      throw new Error("Meta access token is not configured");
+    }
+
+    const response = await fetch(
+      `https://graph.facebook.com/${this.graphVersion}/${mediaId}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+        },
+      },
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Failed to fetch media metadata (${response.status}): ${body}`);
+    }
+
+    return (await response.json()) as MetaMediaMetadata;
+  }
+
+  async downloadMedia(url: string): Promise<{ buffer: Buffer; contentType?: string | null }> {
+    if (!this.token) {
+      throw new Error("Meta access token is not configured");
+    }
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Failed to download media (${response.status}): ${body}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const contentType = response.headers.get("content-type");
+    return { buffer: Buffer.from(arrayBuffer), contentType };
+  }
+
+  private buildMediaDescriptor(type: IncomingMediaType, payload: any): IncomingMediaDescriptor | undefined {
+    if (!payload) return undefined;
+
+    const descriptor: IncomingMediaDescriptor = {
+      provider: "meta",
+      type,
+      mediaId: payload?.id ?? payload?.media_id ?? undefined,
+      url: payload?.link ?? undefined,
+      mimeType: payload?.mime_type ?? payload?.mimetype ?? undefined,
+      filename: payload?.filename ?? undefined,
+      sha256: payload?.sha256 ?? undefined,
+      sizeBytes: payload?.file_size ?? payload?.filesize ?? undefined,
+      width: payload?.width ?? undefined,
+      height: payload?.height ?? undefined,
+      durationSeconds: payload?.duration ?? undefined,
+      pageCount: payload?.page_count ?? undefined,
+      previewUrl: payload?.preview_url ?? undefined,
+      thumbnailUrl: payload?.thumbnail_url ?? undefined,
+      metadata: payload,
+    };
+
+    return descriptor;
+  }
+}
+
+export interface MetaMediaMetadata {
+  id: string;
+  url: string;
+  mime_type?: string;
+  sha256?: string;
+  file_size?: number;
+  width?: number;
+  height?: number;
+  voice?: boolean;
+  messaging_product?: string;
+  name?: string;
 }

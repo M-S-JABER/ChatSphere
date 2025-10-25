@@ -4,12 +4,13 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Search, Archive, ArchiveRestore, MoreVertical } from "lucide-react";
+import { Search, Archive, ArchiveRestore, MoreVertical, Pin, Loader2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { NewConversationDialog } from "@/components/NewConversationDialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface ConversationListProps {
   conversations: Conversation[];
@@ -20,6 +21,10 @@ interface ConversationListProps {
   onToggleArchived?: () => void;
   onArchive?: (id: string, archived: boolean) => void;
   onCreateConversation?: (payload: { phone: string; body?: string }) => void;
+  pinnedConversationIds?: string[];
+  onTogglePin?: (conversation: Conversation, willPin: boolean) => void;
+  maxPinned?: number;
+  pinningConversationId?: string | null;
 }
 
 export function ConversationList({ 
@@ -31,6 +36,10 @@ export function ConversationList({
   onToggleArchived,
   onArchive,
   onCreateConversation,
+  pinnedConversationIds = [],
+  onTogglePin,
+  maxPinned = 10,
+  pinningConversationId = null,
 }: ConversationListProps) {
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -63,6 +72,16 @@ export function ConversationList({
     return phone.includes(query) || displayName.includes(query);
   });
 
+  const pinnedSet = new Set(pinnedConversationIds);
+  const pinnedOrdered = pinnedConversationIds
+    .map((id) => filteredConversations.find((conv) => conv.id === id))
+    .filter((conv): conv is Conversation => Boolean(conv));
+  const otherConversations = filteredConversations.filter((conv) => !pinnedSet.has(conv.id));
+  const orderedConversations = [...pinnedOrdered, ...otherConversations];
+
+  const firstPinnedId = pinnedOrdered[0]?.id;
+  const firstUnpinnedId = otherConversations[0]?.id;
+
   if (isLoading) {
     return (
       <div className="flex flex-col h-screen border-r border-border bg-card">
@@ -93,7 +112,8 @@ export function ConversationList({
   }
 
   return (
-    <div className="flex flex-col h-screen border-r border-border bg-card">
+    <TooltipProvider delayDuration={150}>
+      <div className="flex flex-col h-screen border-r border-border bg-card">
       <div className="p-4 border-b border-border space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-xl font-medium text-foreground">Messages</h1>
@@ -151,7 +171,7 @@ export function ConversationList({
       </div>
 
       <ScrollArea className="flex-1">
-        {filteredConversations.length === 0 ? (
+        {orderedConversations.length === 0 ? (
           <div className="flex flex-col items-center justify-center p-8 text-center">
             <div className="w-16 h-16 rounded-full bg-secondary flex items-center justify-center mb-4">
               {searchQuery.trim() ? (
@@ -178,83 +198,155 @@ export function ConversationList({
             </p>
           </div>
         ) : (
-          <div className="p-2">
-            {filteredConversations.map((conv) => (
-              <div key={conv.id} className="relative group">
-                <button
-                  onClick={() => onSelect(conv.id)}
-                  className={`w-full p-3 rounded-lg hover-elevate active-elevate-2 text-left transition-colors ${
-                    selectedId === conv.id ? "bg-sidebar-accent" : ""
-                  }`}
-                  data-testid={`button-conversation-${conv.id}`}
-                >
-                  <div className="flex gap-3">
-                    <Avatar className="h-12 w-12 flex-shrink-0">
-                      <AvatarFallback className="bg-primary text-primary-foreground font-medium text-base">
-                        {getInitials(conv.phone, conv.displayName)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex justify-between items-baseline gap-2 mb-1">
-                        <h3 className="font-medium text-foreground truncate text-base">
-                          {getDisplayName(conv)}
-                        </h3>
-                        {conv.lastAt && (
-                          <span className="text-xs text-muted-foreground flex-shrink-0">
-                            {formatTimestamp(conv.lastAt)}
-                          </span>
-                        )}
+          <div className="p-2 space-y-1">
+            {orderedConversations.map((conv) => {
+              const isPinned = pinnedSet.has(conv.id);
+              const showPinnedLabel = isPinned && conv.id === firstPinnedId;
+              const showOthersLabel = !isPinned && firstUnpinnedId === conv.id && pinnedOrdered.length > 0;
+              const pinLimitReachedForThisChat = !isPinned && pinnedOrdered.length >= maxPinned;
+
+              return (
+                <div key={conv.id} className="space-y-1">
+                  {showPinnedLabel && (
+                    <div className="px-3 pt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Pinned
+                    </div>
+                  )}
+                  {showOthersLabel && (
+                    <div className="px-3 pt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      All chats
+                    </div>
+                  )}
+
+                  <div className="relative group">
+                    <button
+                      onClick={() => onSelect(conv.id)}
+                      className={`w-full p-3 pr-16 rounded-lg hover-elevate active-elevate-2 text-left transition-colors ${
+                        selectedId === conv.id ? "bg-sidebar-accent" : ""
+                      } ${isPinned ? "ring-1 ring-amber-400/40" : ""}`}
+                      data-testid={`button-conversation-${conv.id}`}
+                    >
+                      <div className="flex gap-3">
+                        <Avatar className="h-12 w-12 flex-shrink-0">
+                          <AvatarFallback className="bg-primary text-primary-foreground font-medium text-base">
+                            {getInitials(conv.phone, conv.displayName)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start gap-2 mb-1">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <h3 className="font-medium text-foreground truncate text-base">
+                                {getDisplayName(conv)}
+                              </h3>
+                              {isPinned && (
+                                <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600">
+                                  Pinned
+                                </span>
+                              )}
+                            </div>
+                            {conv.lastAt && (
+                              <span className="ml-auto text-xs text-muted-foreground flex-shrink-0">
+                                {formatTimestamp(conv.lastAt)}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-muted-foreground font-mono truncate">
+                            {conv.phone}
+                          </p>
+                        </div>
                       </div>
-                      <p className="text-sm text-muted-foreground font-mono truncate">
-                        {conv.phone}
-                      </p>
+                    </button>
+
+                    <div className="absolute right-2 top-2 flex items-center gap-1">
+                      {onTogglePin && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className={`h-8 w-8 transition-all ${
+                                isPinned
+                                  ? "text-amber-600 hover:text-amber-700 hover:bg-amber-500/20 bg-amber-500/15"
+                                  : "text-muted-foreground hover:text-primary"
+                              }`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onTogglePin(conv, !isPinned);
+                              }}
+                              disabled={pinningConversationId === conv.id}
+                              aria-disabled={pinLimitReachedForThisChat}
+                              aria-pressed={isPinned}
+                              aria-label={isPinned ? `Unpin ${getDisplayName(conv)}` : `Pin ${getDisplayName(conv)}`}
+                              data-testid={`button-pin-${conv.id}`}
+                            >
+                              {pinningConversationId === conv.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Pin
+                                  className={`h-4 w-4 transition-transform duration-200 ${
+                                    isPinned ? "-rotate-45" : "rotate-0"
+                                  }`}
+                                />
+                              )}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="left">
+                            <p>
+                              {isPinned
+                                ? "Unpin chat"
+                                : pinLimitReachedForThisChat
+                                ? `Pin chat (limit ${maxPinned})`
+                                : "Pin chat"}
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
+
+                      {onArchive && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              data-testid={`button-conversation-menu-${conv.id}`}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onArchive(conv.id, !conv.archived);
+                              }}
+                              data-testid={`button-archive-${conv.id}`}
+                            >
+                              {conv.archived ? (
+                                <>
+                                  <ArchiveRestore className="mr-2 h-4 w-4" />
+                                  <span>Unarchive</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Archive className="mr-2 h-4 w-4" />
+                                  <span>Archive</span>
+                                </>
+                              )}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                     </div>
                   </div>
-                </button>
-                
-                {onArchive && (
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          data-testid={`button-conversation-menu-${conv.id}`}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onArchive(conv.id, !conv.archived);
-                          }}
-                          data-testid={`button-archive-${conv.id}`}
-                        >
-                          {conv.archived ? (
-                            <>
-                              <ArchiveRestore className="mr-2 h-4 w-4" />
-                              <span>Unarchive</span>
-                            </>
-                          ) : (
-                            <>
-                              <Archive className="mr-2 h-4 w-4" />
-                              <span>Archive</span>
-                            </>
-                          )}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                )}
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         )}
       </ScrollArea>
-    </div>
+      </div>
+    </TooltipProvider>
   );
 }

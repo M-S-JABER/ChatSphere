@@ -1,12 +1,37 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import express from "express";
+import { promises as fs } from "fs";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import path from "path";
+import type { MessageMedia } from "@shared/schema";
 import { storage, type WhatsappInstanceConfig } from "./storage";
 import { MetaProvider } from "./providers/meta";
 import { WebhookDebugger } from "./debug-webhook";
+import { logger } from "./logger";
+import type { IncomingMediaDescriptor } from "./providers/base";
+import {
+  ingestWhatsappMedia,
+  buildSignedMediaUrlsForMessage,
+} from "./services/media-pipeline";
+import {
+  ensureMediaDirectories,
+  resolveAbsoluteMediaPath,
+  extractRelativeMediaPath,
+  buildSignedMediaPath,
+  toRelativeMediaPath,
+  toUrlPath,
+} from "./services/media-storage";
 import { upload } from "./services/uploads";
+import { verifySignedUrl } from "./lib/signedUrl";
+import {
+  normalizeMimeType,
+  getExtensionFromMime,
+  getMimeType,
+  getMimeTypeFromExtension,
+} from "./lib/mime";
+
+const MAX_PINNED_CONVERSATIONS = 10;
 
 function resolvePublicMediaUrl(req: Request, mediaPath: string): string {
   if (!mediaPath) {
@@ -51,6 +76,81 @@ function resolvePublicMediaUrl(req: Request, mediaPath: string): string {
   return `${protocol}://${host}${path}`;
 }
 
+const getExtensionFromFilename = (filename?: string | null): string | null => {
+  if (!filename) return null;
+  const normalized = filename.split(".").pop();
+  return normalized ? normalized.toLowerCase() : null;
+};
+
+function createPendingMediaDescriptor(descriptor?: IncomingMediaDescriptor | null): MessageMedia | null {
+  if (!descriptor) {
+    return null;
+  }
+
+  const inferredExtension =
+    getExtensionFromMime(descriptor.mimeType) ?? getExtensionFromFilename(descriptor.filename) ?? null;
+
+  return {
+    origin: "whatsapp",
+    type: descriptor.type ?? "unknown",
+    status: "pending",
+    provider: descriptor.provider ?? "meta",
+    providerMediaId: descriptor.mediaId ?? null,
+    mimeType: normalizeMimeType(descriptor.mimeType) ?? null,
+    filename: descriptor.filename ?? null,
+    extension: inferredExtension,
+    sizeBytes: descriptor.sizeBytes ?? null,
+    checksum: descriptor.sha256 ?? null,
+    width: descriptor.width ?? null,
+    height: descriptor.height ?? null,
+    durationSeconds: descriptor.durationSeconds ?? null,
+    pageCount: descriptor.pageCount ?? null,
+    url: null,
+    thumbnailUrl: null,
+    previewUrl: null,
+    placeholderUrl: null,
+    storage: null,
+    downloadAttempts: 0,
+    downloadError: null,
+    downloadedAt: null,
+    thumbnailGeneratedAt: null,
+    metadata: descriptor.metadata ? { whatsapp: descriptor.metadata } : null,
+  };
+}
+
+function extensionToMediaType(extension: string | null): MessageMedia["type"] {
+  if (!extension) return "unknown";
+  const ext = extension.replace(/^\./, "").toLowerCase();
+  if (["jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "svg"].includes(ext)) {
+    return "image";
+  }
+  if (["mp4", "mov", "m4v", "webm", "avi", "mkv"].includes(ext)) {
+    return "video";
+  }
+  if (["mp3", "wav", "m4a", "ogg", "aac"].includes(ext)) {
+    return "audio";
+  }
+  if (
+    [
+      "pdf",
+      "doc",
+      "docx",
+      "xls",
+      "xlsx",
+      "ppt",
+      "pptx",
+      "txt",
+      "csv",
+      "zip",
+      "rar",
+      "7z",
+    ].includes(ext)
+  ) {
+    return "document";
+  }
+  return "unknown";
+}
+
 // Helper function to create a Meta provider using persisted settings (with env fallback)
 async function createMetaProvider(): Promise<{
   provider: MetaProvider;
@@ -71,7 +171,8 @@ async function createMetaProvider(): Promise<{
       instance.accessToken,
       instance.phoneNumberId,
       instance.webhookVerifyToken ?? undefined,
-      instance.appSecret ?? undefined
+      instance.appSecret ?? undefined,
+      undefined,
     );
 
     return { provider, instance };
@@ -81,7 +182,8 @@ async function createMetaProvider(): Promise<{
     process.env.META_TOKEN,
     process.env.META_PHONE_NUMBER_ID,
     process.env.META_VERIFY_TOKEN,
-    process.env.META_APP_SECRET
+    process.env.META_APP_SECRET,
+    process.env.META_GRAPH_VERSION,
   );
 
   return { provider, instance: null };
@@ -123,6 +225,8 @@ function toInstanceResponse(instance: WhatsappInstanceConfig | null) {
 
 export async function registerRoutes(app: Express, requireAdmin: any): Promise<Server> {
   // Use persistent storage for webhook events and settings (no in-memory state)
+
+  ensureMediaDirectories();
 
   const normalizeWebhookPath = (inputPath: string): string => {
     const fallback = "/webhook/meta";
@@ -379,8 +483,104 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
     res.json(hook);
   });
 
-  // Serve uploaded files
-  app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+  app.get("/media/*", async (req: Request, res: Response) => {
+    const validation = verifySignedUrl(req);
+    if (!validation.valid) {
+      return res.status(validation.status).json({ error: validation.message });
+    }
+
+    const relativePath = req.params[0];
+    if (!relativePath) {
+      return res.status(404).json({ error: "Not found" });
+    }
+
+    try {
+      const absolutePath = resolveAbsoluteMediaPath(relativePath);
+      await fs.access(absolutePath);
+
+      const extension = path.extname(absolutePath).replace(/^\./, "");
+      const mime = getMimeTypeFromExtension(extension) ?? getMimeType(extension);
+
+      res.setHeader("Cache-Control", "private, max-age=60");
+      res.setHeader("Content-Type", mime ?? "application/octet-stream");
+      res.setHeader("Content-Disposition", "inline");
+
+      res.sendFile(absolutePath, (error) => {
+        if (error) {
+          if (!res.headersSent) {
+            const status = (error as NodeJS.ErrnoException)?.code === "ENOENT" ? 404 : 500;
+            res.status(status).end();
+          }
+        }
+      });
+    } catch (error: any) {
+      if (error?.code === "ENOENT") {
+        return res.status(404).json({ error: "Not found" });
+      }
+
+      logger.error({ err: error, relativePath }, "Failed to serve media file");
+      return res.status(500).json({ error: "Failed to serve media" });
+    }
+  });
+
+  app.get("/api/conversations/pins", async (req: Request, res: Response) => {
+    if (!req.isAuthenticated?.() || !req.user) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    try {
+      const pins = await storage.getPinnedConversationsForUser(req.user.id);
+      res.json({ pins });
+    } catch (error: any) {
+      logger.error({ err: error }, "failed to get pinned conversations");
+      res.status(500).json({ error: error?.message ?? "Failed to load pinned conversations" });
+    }
+  });
+
+  app.post("/api/conversations/:id/pin", async (req: Request, res: Response) => {
+    if (!req.isAuthenticated?.() || !req.user) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    try {
+      const conversationId = req.params.id;
+      if (!conversationId) {
+        return res.status(400).json({ error: "Conversation id is required." });
+      }
+
+      const bodyPinned = req.body?.pinned;
+      if (typeof bodyPinned !== "boolean") {
+        return res.status(400).json({ error: "pinned must be a boolean." });
+      }
+
+      const conversation = await storage.getConversationById(conversationId);
+      if (!conversation) {
+        return res.status(404).json({ error: "Conversation not found." });
+      }
+
+      const userId = req.user.id;
+
+      if (bodyPinned) {
+        const alreadyPinned = await storage.isConversationPinned(userId, conversationId);
+        if (!alreadyPinned) {
+          const currentCount = await storage.countPinnedConversations(userId);
+          if (currentCount >= MAX_PINNED_CONVERSATIONS) {
+            return res.status(400).json({ error: "You can only pin up to 10 chats." });
+          }
+        }
+
+        await storage.pinConversation(userId, conversationId);
+      } else {
+        await storage.unpinConversation(userId, conversationId);
+      }
+
+      const pins = await storage.getPinnedConversationsForUser(userId);
+      res.json({ pinned: bodyPinned, pins });
+    } catch (error: any) {
+      logger.error({ err: error }, "failed to toggle pin state");
+      res.status(500).json({ error: error?.message ?? "Failed to update pin state" });
+    }
+  });
 
   // File upload endpoint
   app.post("/api/upload", upload.single("file"), async (req: Request, res: Response) => {
@@ -389,9 +589,33 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
         return res.status(400).json({ error: "No file uploaded" });
       }
 
-      const fileUrl = `/uploads/${req.file.filename}`;
-      const publicUrl = resolvePublicMediaUrl(req, fileUrl);
-      res.json({ url: fileUrl, publicUrl });
+      const relativePath = toRelativeMediaPath([
+        "outbound",
+        "original",
+        req.file.filename,
+      ]);
+      const unsignedPath = toUrlPath(relativePath);
+      const signedPath = buildSignedMediaPath(relativePath);
+      const publicUrl = resolvePublicMediaUrl(req, signedPath);
+
+      let expiresAt: number | undefined;
+      try {
+        const signedUrl = new URL(signedPath, "https://placeholder.local");
+        const expires = signedUrl.searchParams.get("expires");
+        if (expires) {
+          expiresAt = Number(expires);
+        }
+      } catch {
+        expiresAt = undefined;
+      }
+
+      res.json({
+        url: signedPath,
+        publicUrl,
+        relativePath,
+        unsignedUrl: unsignedPath,
+        expiresAt,
+      });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -431,7 +655,8 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
       const page = parseInt(req.query.page as string) || 1;
       const pageSize = parseInt(req.query.page_size as string) || 50;
       const result = await storage.getMessages(id, page, pageSize);
-      res.json(result);
+      const signedItems = result.items.map((item) => buildSignedMediaUrlsForMessage(item));
+      res.json({ ...result, items: signedItems });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -593,21 +818,64 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
         }),
       );
 
+      const relativeMediaPath = media_url ? extractRelativeMediaPath(media_url) : null;
+      const inferredFilename = relativeMediaPath
+        ? path.basename(relativeMediaPath)
+        : media_url
+        ? path.basename(media_url.split("?")[0].split("#")[0])
+        : null;
+      const extension = getExtensionFromFilename(inferredFilename);
+      const outboundMediaType = extensionToMediaType(extension);
+      const inferredMime =
+        (extension ? getMimeTypeFromExtension(extension) : null) ??
+        (extension ? getMimeType(extension) : null);
+
+      const outboundMedia: MessageMedia | null = media_url
+        ? {
+            origin: "upload",
+            type: outboundMediaType,
+            status: "ready",
+            provider: "local",
+            providerMediaId: null,
+            mimeType: inferredMime,
+            filename: inferredFilename,
+            extension,
+            sizeBytes: null,
+            checksum: null,
+            width: null,
+            height: null,
+            durationSeconds: null,
+            pageCount: null,
+            url: relativeMediaPath ? toUrlPath(relativeMediaPath) : media_url.split("?")[0],
+            thumbnailUrl: null,
+            previewUrl: null,
+            placeholderUrl: null,
+            storage: relativeMediaPath
+              ? {
+                  originalPath: relativeMediaPath,
+                  thumbnailPath: null,
+                  previewPath: null,
+                }
+              : null,
+            downloadAttempts: 0,
+            downloadError: null,
+            downloadedAt: new Date().toISOString(),
+            thumbnailGeneratedAt: null,
+            metadata: {
+              origin: "upload",
+            },
+          }
+        : null;
+
       const { provider } = await createMetaProvider();
       let providerMessageId: string | null = null;
       let status: string = "sent";
-      let mediaMetadata: { url: string; filename?: string } | null = null;
+      const providerMediaPath = relativeMediaPath ? buildSignedMediaPath(relativeMediaPath) : media_url ?? undefined;
 
       try {
-        const providerMediaUrl = media_url
-          ? resolvePublicMediaUrl(req, media_url)
+        const providerMediaUrl = providerMediaPath
+          ? resolvePublicMediaUrl(req, providerMediaPath)
           : undefined;
-
-        if (media_url) {
-          const normalizedUrl = media_url.split('?')[0].split('#')[0];
-          const filename = path.basename(normalizedUrl || "attachment");
-          mediaMetadata = { url: media_url, filename };
-        }
 
         const providerResp = await provider.send(recipientPhone, body ?? undefined, providerMediaUrl);
         providerMessageId = providerResp.id || null;
@@ -620,7 +888,7 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
         conversationId: conversation.id,
         direction: "outbound",
         body: body || null,
-        media: mediaMetadata,
+        media: outboundMedia,
         providerMessageId,
         status,
         replyToMessageId: replyToMessageId ?? null,
@@ -630,10 +898,11 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
       await storage.updateConversationLastAt(conversation.id);
 
       const messageWithReply = await storage.getMessageWithReplyById(message.id);
+      const payload = buildSignedMediaUrlsForMessage(messageWithReply ?? message);
 
-      res.json({ ok: true, message: messageWithReply ?? message });
+      res.json({ ok: true, message: payload });
 
-      broadcastMessage("message_outgoing", messageWithReply ?? message);
+      broadcastMessage("message_outgoing", payload);
 
       console.info(
         "message_sent_reply",
@@ -797,23 +1066,41 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
 
       for (const event of events) {
         console.log(`💬 Processing event from: ${event.from}`);
-        
+
+        if (event.providerMessageId) {
+          const existing = await storage.getMessageByProviderMessageId(event.providerMessageId);
+          if (existing) {
+            logger.info(
+              {
+                providerMessageId: event.providerMessageId,
+                existingMessageId: existing.id,
+                conversationId: existing.conversationId,
+              },
+              "Skipping duplicate webhook message",
+            );
+            continue;
+          }
+        }
+
         let conversation = await storage.getConversationByPhone(event.from);
         if (!conversation) {
           console.log(`🆕 Creating new conversation for: ${event.from}`);
-          conversation = await storage.createConversation({ 
+          conversation = await storage.createConversation({
             phone: event.from,
           });
         } else {
           console.log(`📞 Using existing conversation: ${conversation.id}`);
         }
 
+        const pendingMedia = createPendingMediaDescriptor(event.media);
+
         console.log(`💾 Saving message to database...`);
         const message = await storage.createMessage({
           conversationId: conversation.id,
           direction: "inbound",
-          body: event.body || null,
-          media: event.media || null,
+          body: event.body ?? null,
+          media: pendingMedia,
+          providerMessageId: event.providerMessageId ?? null,
           status: "received",
           raw: event.raw,
           replyToMessageId: null,
@@ -821,20 +1108,44 @@ export async function registerRoutes(app: Express, requireAdmin: any): Promise<S
 
         console.log(`✅ Message saved with ID: ${message.id}`);
 
-        // persist webhook event
         await storage.logWebhookEvent({
           headers: req.headers,
           query: req.query,
           body: event.raw || event,
-          response: { status: 200, body: 'ok' },
+          response: { status: 200, body: 'ok', messageId: message.id },
         });
 
         await storage.updateConversationLastAt(conversation.id);
         console.log(`🔄 Updated conversation last_at timestamp`);
 
+        const signedMessage = buildSignedMediaUrlsForMessage(message);
         console.log(`📡 Broadcasting message to WebSocket clients...`);
-        broadcastMessage("message_incoming", message);
+        broadcastMessage("message_incoming", signedMessage);
         console.log(`✅ Message broadcasted`);
+
+        if (event.media) {
+          ingestWhatsappMedia({
+            messageId: message.id,
+            conversationId: conversation.id,
+            descriptor: event.media,
+            provider,
+            onStatusChange: async (updated) => {
+              if (!updated) return;
+              const signed = buildSignedMediaUrlsForMessage(updated);
+              broadcastMessage("message_media_updated", signed);
+            },
+          }).catch((error: any) => {
+            logger.error(
+              {
+                err: error,
+                conversationId: conversation.id,
+                messageId: message.id,
+                providerMessageId: event.providerMessageId,
+              },
+              "Error ingesting WhatsApp media",
+            );
+          });
+        }
       }
 
       const duration = Date.now() - startTime;

@@ -1,6 +1,10 @@
-import { randomUUID } from "crypto";
 import multer from "multer";
 import path from "path";
+import {
+  buildMediaFileName,
+  ensureMediaDirectories,
+  resolveAbsoluteMediaPath,
+} from "./media-storage";
 
 export const MAX_UPLOAD_FILE_SIZE_BYTES = 100 * 1024 * 1024; // 100 MB
 
@@ -38,12 +42,20 @@ const ALLOWED_EXTENSIONS = new Set<string>([
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
-    cb(null, "uploads/");
+    try {
+      ensureMediaDirectories();
+      const targetDir = resolveAbsoluteMediaPath(path.join("outbound", "original"));
+      cb(null, targetDir);
+    } catch (error) {
+      cb(error as Error, "");
+    }
   },
   filename: (_req, file, cb) => {
-    const uniqueSuffix = `${Date.now()}-${randomUUID()}`;
-    const ext = path.extname(file.originalname) || "";
-    cb(null, `${uniqueSuffix}${ext}`);
+    const uniqueName = buildMediaFileName({
+      originalFileName: `${Date.now()}-${file.originalname}`,
+      prefix: "upload",
+    });
+    cb(null, uniqueName);
   },
 });
 

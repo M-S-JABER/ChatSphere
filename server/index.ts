@@ -7,6 +7,7 @@ import { setupAuth } from "./auth";
 import { setupVite, serveStatic } from "./vite";
 import { httpLogger, logger } from "./logger";
 import { registerHealthRoute } from "./health";
+import { assertSigningSecret } from "./lib/signedUrl";
 
 // Ensure uploads directory exists
 try {
@@ -22,6 +23,8 @@ app.set("env", env.NODE_ENV);
 
 app.set("trust proxy", true);
 app.use(httpLogger);
+
+assertSigningSecret();
 
 const enforceHttps = env.ENFORCE_HTTPS ?? false;
 

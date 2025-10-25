@@ -5,6 +5,7 @@ import {
   webhooks,
   webhookEvents,
   appSettings,
+  conversationPins,
   type Conversation,
   type Message,
   type User,
@@ -13,6 +14,7 @@ import {
   type InsertConversation,
   type InsertMessage,
   type InsertUser,
+  type MessageMedia,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and, inArray } from "drizzle-orm";
@@ -52,6 +54,8 @@ export interface IStorage {
   createMessage(message: InsertMessage): Promise<Message>;
   getMessageById(id: string): Promise<Message | undefined>;
   getMessageWithReplyById(id: string): Promise<(Message & { replyTo?: ReplySummary | null }) | undefined>;
+  getMessageByProviderMessageId(providerMessageId: string): Promise<Message | undefined>;
+  updateMessageMedia(id: string, media: MessageMedia | null): Promise<Message | undefined>;
   deleteMessage(id: string): Promise<{ id: string; conversationId: string } | null>;
   deleteConversation(id: string): Promise<void>;
   
@@ -79,6 +83,12 @@ export interface IStorage {
   clearDefaultWhatsappInstance(): Promise<void>;
   getMetaWebhookSettings(): Promise<MetaWebhookSettings>;
   setMetaWebhookSettings(settings: MetaWebhookSettings): Promise<void>;
+
+  getPinnedConversationsForUser(userId: string): Promise<Array<{ conversationId: string; pinnedAt: Date }>>;
+  pinConversation(userId: string, conversationId: string): Promise<void>;
+  unpinConversation(userId: string, conversationId: string): Promise<void>;
+  isConversationPinned(userId: string, conversationId: string): Promise<boolean>;
+  countPinnedConversations(userId: string): Promise<number>;
   
   sessionStore: session.Store;
 }
@@ -254,6 +264,24 @@ export class DatabaseStorage implements IStorage {
   async getMessageById(id: string): Promise<Message | undefined> {
     const [message] = (await db.select().from(messages).where(eq(messages.id, id))) as Message[];
     return message;
+  }
+
+  async getMessageByProviderMessageId(providerMessageId: string): Promise<Message | undefined> {
+    const [message] = (await db
+      .select()
+      .from(messages)
+      .where(eq(messages.providerMessageId, providerMessageId))
+      .limit(1)) as Message[];
+    return message;
+  }
+
+  async updateMessageMedia(id: string, media: MessageMedia | null): Promise<Message | undefined> {
+    const [updated] = (await db
+      .update(messages)
+      .set({ media })
+      .where(eq(messages.id, id))
+      .returning()) as Message[];
+    return updated;
   }
 
   async getMessageWithReplyById(id: string): Promise<(Message & { replyTo?: ReplySummary | null }) | undefined> {
@@ -694,6 +722,72 @@ export class DatabaseStorage implements IStorage {
 
   async clearDefaultWhatsappInstance(): Promise<void> {
     await db.delete(appSettings).where(eq(appSettings.key, "defaultWhatsappInstance"));
+  }
+
+  async getPinnedConversationsForUser(
+    userId: string,
+  ): Promise<Array<{ conversationId: string; pinnedAt: Date }>> {
+    const rows = await db
+      .select({
+        conversationId: conversationPins.conversationId,
+        pinnedAt: conversationPins.pinnedAt,
+      })
+      .from(conversationPins)
+      .where(eq(conversationPins.userId, userId))
+      .orderBy(desc(conversationPins.pinnedAt));
+
+    return rows.map((row) => ({
+      conversationId: row.conversationId,
+      pinnedAt: row.pinnedAt ?? new Date(0),
+    }));
+  }
+
+  async pinConversation(userId: string, conversationId: string): Promise<void> {
+    await db
+      .insert(conversationPins)
+      .values({ userId, conversationId })
+      .onConflictDoUpdate({
+        target: [conversationPins.userId, conversationPins.conversationId],
+        set: {
+          pinnedAt: new Date(),
+        },
+      });
+  }
+
+  async unpinConversation(userId: string, conversationId: string): Promise<void> {
+    await db
+      .delete(conversationPins)
+      .where(
+        and(
+          eq(conversationPins.userId, userId),
+          eq(conversationPins.conversationId, conversationId),
+        ),
+      );
+  }
+
+  async isConversationPinned(userId: string, conversationId: string): Promise<boolean> {
+    const result = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(conversationPins)
+      .where(
+        and(
+          eq(conversationPins.userId, userId),
+          eq(conversationPins.conversationId, conversationId),
+        ),
+      )
+      .limit(1);
+
+    return (result[0]?.count ?? 0) > 0;
+  }
+
+  async countPinnedConversations(userId: string): Promise<number> {
+    const result = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(conversationPins)
+      .where(eq(conversationPins.userId, userId))
+      .limit(1);
+
+    return result[0]?.count ?? 0;
   }
 
   private sanitizeWebhookPath(path: unknown): string {

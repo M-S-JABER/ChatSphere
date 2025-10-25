@@ -5,10 +5,15 @@ type SignatureValidationResult =
   | { valid: true }
   | { valid: false; status: number; message: string };
 
-const REQUIRE_SIGNED_URL =
-  String(process.env.REQUIRE_SIGNED_URL ?? "false").toLowerCase() === "true";
-
 const SIGNING_SECRET = process.env.FILES_SIGNING_SECRET;
+
+const REQUIRE_SIGNED_URL = (() => {
+  const explicit = process.env.REQUIRE_SIGNED_URL;
+  if (explicit != null) {
+    return String(explicit).toLowerCase() === "true";
+  }
+  return Boolean(SIGNING_SECRET);
+})();
 
 export function assertSigningSecret(): void {
   if (REQUIRE_SIGNED_URL && !SIGNING_SECRET) {

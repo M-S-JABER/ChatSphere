@@ -76,6 +76,26 @@ export async function ensureSchema(): Promise<void> {
     `);
 
     await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_provider_message_id
+      ON messages (provider_message_id)
+      WHERE provider_message_id IS NOT NULL;
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS conversation_pins (
+        user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        conversation_id varchar NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        pinned_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (user_id, conversation_id)
+      );
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_conversation_pins_user_pinned_at
+      ON conversation_pins (user_id, pinned_at DESC);
+    `);
+
+    await client.query(`
       UPDATE messages
       SET direction = CASE 
         WHEN direction = 'in' THEN 'inbound'

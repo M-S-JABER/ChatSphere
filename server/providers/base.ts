@@ -3,13 +3,32 @@ export interface SendMessageResponse {
   status: string;
 }
 
+export type IncomingMediaType = "image" | "video" | "audio" | "document" | "unknown";
+
+export interface IncomingMediaDescriptor {
+  provider: "meta" | string;
+  type: IncomingMediaType;
+  mediaId?: string;
+  url?: string;
+  mimeType?: string;
+  filename?: string;
+  sha256?: string;
+  sizeBytes?: number;
+  width?: number;
+  height?: number;
+  durationSeconds?: number;
+  pageCount?: number;
+  previewUrl?: string;
+  thumbnailUrl?: string;
+  metadata?: Record<string, any>;
+}
+
 export interface IncomingMessageEvent {
   from: string;
   body?: string;
-  media?: {
-    url: string;
-    filename?: string;
-  };
+  media?: IncomingMediaDescriptor;
+  providerMessageId?: string;
+  timestamp?: string;
   raw?: any;
 }
 

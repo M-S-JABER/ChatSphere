@@ -14,15 +14,18 @@ import { Settings } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { type ChatMessage } from "@/types/messages";
 
+const MAX_PINNED_CONVERSATIONS = 10;
+
 export default function Home() {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [pendingPinId, setPendingPinId] = useState<string | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
   const canDeleteMessages = user?.role === "admin";
 
   const handleWebSocketMessage = useCallback((event: string, data: any) => {
-    if (event === "message_incoming" || event === "message_outgoing") {
+    if (event === "message_incoming" || event === "message_outgoing" || event === "message_media_updated") {
       queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
       
       if (data.conversationId) {
@@ -63,6 +66,18 @@ export default function Home() {
 
   const conversations = conversationsData?.items || [];
   const selectedConversation = conversations.find((c) => c.id === selectedConversationId) || null;
+
+  const { data: pinnedData } = useQuery<{
+    pins: Array<{ conversationId: string; pinnedAt: string }>;
+  }>({
+    queryKey: ["/api/conversations/pins"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/conversations/pins");
+      return await res.json();
+    },
+  });
+
+  const pinnedConversationIds = pinnedData?.pins?.map((pin) => pin.conversationId) ?? [];
 
   const { data: messagesData, isLoading: messagesLoading } = useQuery<{
     total: number;
@@ -185,6 +200,42 @@ export default function Home() {
     },
   });
 
+  const pinMutation = useMutation({
+    mutationFn: async ({ conversationId, pinned }: { conversationId: string; pinned: boolean }) => {
+      const res = await apiRequest("POST", `/api/conversations/${conversationId}/pin`, { pinned });
+      return await res.json();
+    },
+    onMutate: ({ conversationId }) => {
+      setPendingPinId(conversationId);
+    },
+    onSuccess: (data: any, variables) => {
+      if (data?.pins) {
+        queryClient.setQueryData(["/api/conversations/pins"], data);
+      } else {
+        queryClient.invalidateQueries({ queryKey: ["/api/conversations/pins"] });
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
+
+      toast({
+        title: variables.pinned ? "Conversation pinned" : "Conversation unpinned",
+        description: variables.pinned
+          ? "This chat is now pinned to the top."
+          : "The chat has been removed from your pinned list.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Unable to update pin",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+    onSettled: () => {
+      setPendingPinId(null);
+    },
+  });
+
   const handleSendMessage = async (
     body: string,
     mediaUrl?: string,
@@ -239,6 +290,23 @@ export default function Home() {
     await deleteConversationMutation.mutateAsync(selectedConversation.id);
   };
 
+  const handleTogglePinConversation = (conversation: Conversation, willPin: boolean) => {
+    if (
+      willPin &&
+      !pinnedConversationIds.includes(conversation.id) &&
+      pinnedConversationIds.length >= MAX_PINNED_CONVERSATIONS
+    ) {
+      toast({
+        title: "Pin limit reached",
+        description: "You can only pin up to 10 chats.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    pinMutation.mutate({ conversationId: conversation.id, pinned: willPin });
+  };
+
   return (
     <div className="flex h-screen w-full overflow-hidden">
       <div className="w-full lg:w-[420px] flex-shrink-0">
@@ -251,6 +319,10 @@ export default function Home() {
           onToggleArchived={() => setShowArchived(!showArchived)}
           onArchive={(id, archived) => archiveMutation.mutate({ id, archived })}
           onCreateConversation={handleCreateConversation}
+          pinnedConversationIds={pinnedConversationIds}
+          onTogglePin={handleTogglePinConversation}
+          pinningConversationId={pendingPinId}
+          maxPinned={MAX_PINNED_CONVERSATIONS}
         />
       </div>
 

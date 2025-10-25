@@ -1,10 +1,18 @@
 import type { ChatMessage } from "@/types/messages";
+import type { MessageMedia } from "@shared/schema";
 import { format } from "date-fns";
 import {
   Check,
   CheckCheck,
+  File,
+  FileArchive,
+  FileAudio,
+  FileImage,
+  FileSpreadsheet,
   Download,
   FileText,
+  FileVideo,
+  Loader2,
   MoreHorizontal,
   Trash2,
 } from "lucide-react";
@@ -15,6 +23,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -33,6 +42,95 @@ const getSnippet = (body: string | null | undefined) => {
   return trimmed.length > 120 ? `${trimmed.slice(0, 117)}…` : trimmed;
 };
 
+const formatFileSize = (bytes?: number | null): string => {
+  if (!bytes || !Number.isFinite(bytes) || bytes <= 0) {
+    return "";
+  }
+
+  const units = ["bytes", "KB", "MB", "GB", "TB"] as const;
+  let value = bytes;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  if (unitIndex === 0) {
+    return `${Math.round(value)} ${units[unitIndex]}`;
+  }
+
+  return `${value.toFixed(1)} ${units[unitIndex]}`;
+};
+
+const getMediaDisplayName = (media: MessageMedia): string => {
+  if (media.filename?.trim()) {
+    return media.filename.trim();
+  }
+
+  if (media.extension) {
+    return `attachment.${media.extension}`;
+  }
+
+  return "attachment";
+};
+
+const getDocumentLabel = (media: MessageMedia): string => {
+  const extension = media.extension?.toLowerCase();
+  if (!extension) return "Document";
+
+  if (extension === "pdf") return "PDF";
+  if (["doc", "docx"].includes(extension)) return "Word Document";
+  if (["xls", "xlsx", "csv"].includes(extension)) return "Spreadsheet";
+  if (["ppt", "pptx"].includes(extension)) return "Presentation";
+  if (["txt", "json"].includes(extension)) return "Text File";
+  if (["zip", "rar", "7z"].includes(extension)) return "Archive";
+  return "Document";
+};
+
+const getMediaLabel = (media: MessageMedia): string => {
+  switch (media.type) {
+    case "image":
+      return "Image";
+    case "video":
+      return "Video";
+    case "audio":
+      return "Audio";
+    case "document":
+      return getDocumentLabel(media);
+    default:
+      return "File";
+  }
+};
+
+const getMediaIcon = (media: MessageMedia) => {
+  if (media.type === "image") {
+    return <FileImage className="h-5 w-5" />;
+  }
+  if (media.type === "video") {
+    return <FileVideo className="h-5 w-5" />;
+  }
+  if (media.type === "audio") {
+    return <FileAudio className="h-5 w-5" />;
+  }
+
+  if (media.type === "document") {
+    const extension = media.extension?.toLowerCase();
+    if (extension === "pdf") {
+      return <FileText className="h-5 w-5" />;
+    }
+    if (["xls", "xlsx", "csv"].includes(extension ?? "")) {
+      return <FileSpreadsheet className="h-5 w-5" />;
+    }
+    if (["zip", "rar", "7z"].includes(extension ?? "")) {
+      return <FileArchive className="h-5 w-5" />;
+    }
+    return <FileText className="h-5 w-5" />;
+  }
+
+  return <File className="h-5 w-5" />;
+};
+
 export function MessageBubble({
   message,
   canDelete,
@@ -43,22 +141,7 @@ export function MessageBubble({
 }: MessageBubbleProps) {
   const isOutgoing = message.direction === "outbound";
 
-  const mediaUrl = message.media?.url ?? undefined;
-  const mediaFilename = message.media?.filename || (mediaUrl ? mediaUrl.split("/").pop()?.split("?")[0] : undefined);
-
-  const extension = mediaUrl
-    ? mediaUrl.split("?")[0].split("#")[0].split(".").pop()?.toLowerCase() || ""
-    : "";
-
-  const isImage = extension
-    ? ["jpg", "jpeg", "png", "gif", "webp"].includes(extension)
-    : false;
-
-  const isDocument = extension ? ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv"].includes(extension) : false;
-
-  const isVideo = extension ? ["mp4", "mov", "avi", "mkv", "webm"].includes(extension) : false;
-
-  const isAudio = extension ? ["mp3", "mpeg", "ogg", "wav", "aac"].includes(extension) : false;
+  const media = (message.media as MessageMedia | null) ?? null;
 
   const formatTime = (date: string | Date) => {
     try {
@@ -76,6 +159,153 @@ export function MessageBubble({
     }
     return <Check className="h-4 w-4" />;
   };
+
+  const cardBaseClass = "flex items-center gap-3 rounded-md border px-3 py-2 text-sm transition";
+  const cardToneClass = isOutgoing
+    ? "border-primary-foreground/30 bg-primary-foreground/10 hover:bg-primary-foreground/20"
+    : "border-border bg-muted/60 hover:bg-muted";
+  const failureCardTone = isOutgoing
+    ? "border-primary-foreground/40 bg-primary-foreground/10"
+    : "border-destructive/30 bg-destructive/10";
+  const detailTextClass = isOutgoing ? "text-primary-foreground/80" : "text-muted-foreground";
+
+  const renderDownloadCard = (media: MessageMedia) => (
+    <a
+      href={media.url ?? undefined}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`${cardBaseClass} ${cardToneClass}`}
+      aria-label={`Download ${getMediaDisplayName(media)}`}
+      data-testid="message-attachment-card"
+    >
+      <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
+        {getMediaIcon(media)}
+      </div>
+      <div className="flex-1 overflow-hidden">
+        <div className="truncate font-medium">{getMediaDisplayName(media)}</div>
+        <div className={`text-xs ${detailTextClass}`}>
+          {getMediaLabel(media)}
+          {formatFileSize(media.sizeBytes) ? ` • ${formatFileSize(media.sizeBytes)}` : ""}
+        </div>
+      </div>
+      <Download className="h-4 w-4 flex-shrink-0" />
+    </a>
+  );
+
+  const renderMedia = (media: MessageMedia | null) => {
+    if (!media) {
+      return null;
+    }
+
+    if (media.status === "failed") {
+      return (
+        <div className={`mb-2 rounded-md border px-3 py-2 text-sm ${failureCardTone}`}>
+          <div className="font-medium">Attachment unavailable</div>
+          <div className={`text-xs ${detailTextClass}`}>
+            {media.downloadError ?? "Preview failed to generate."}
+          </div>
+        </div>
+      );
+    }
+
+    if (media.status === "pending" || media.status === "processing") {
+      if (media.type === "image" || media.type === "document") {
+        return (
+          <div className="mb-2 space-y-2">
+            <Skeleton className="h-40 w-full max-w-[280px] rounded-md" />
+            <div className={`flex items-center gap-2 text-xs ${detailTextClass}`}>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Preparing preview…</span>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className={`mb-2 ${cardBaseClass} ${cardToneClass}`}>
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <div className="flex-1">
+            <div className="font-medium">Preparing attachment…</div>
+            <div className={`text-xs ${detailTextClass}`}>This will be ready shortly.</div>
+          </div>
+        </div>
+      );
+    }
+
+    if (!media.url) {
+      return (
+        <div className={`mb-2 ${cardBaseClass} ${cardToneClass}`}>
+          <File className="h-5 w-5" />
+          <div className="flex-1">
+            <div className="font-medium">Attachment ready</div>
+            <div className={`text-xs ${detailTextClass}`}>Download link unavailable.</div>
+          </div>
+        </div>
+      );
+    }
+
+    if (media.type === "image") {
+      const previewUrl = media.thumbnailUrl ?? media.previewUrl ?? media.url;
+      return (
+        <a
+          href={media.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mb-2 block overflow-hidden rounded-md border border-border/40 bg-muted/20"
+          aria-label={`Open image ${getMediaDisplayName(media)}`}
+        >
+          <img
+            src={previewUrl}
+            alt={getMediaDisplayName(media)}
+            loading="lazy"
+            decoding="async"
+            className="h-auto w-full max-w-[320px] object-cover"
+          />
+        </a>
+      );
+    }
+
+    if (media.type === "document") {
+      const previewUrl = media.previewUrl ?? media.thumbnailUrl ?? null;
+      return (
+        <div className="mb-2 space-y-2">
+          {previewUrl && (
+            <a
+              href={media.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="relative block overflow-hidden rounded-md border border-border/40 bg-muted/30"
+              aria-label={`Open ${getMediaDisplayName(media)}`}
+            >
+              <img
+                src={previewUrl}
+                alt={getMediaDisplayName(media)}
+                loading="lazy"
+                decoding="async"
+                className="h-auto w-full max-w-[320px] object-cover"
+              />
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent p-3 text-xs text-white">
+                <div className="truncate text-sm font-medium">{getMediaDisplayName(media)}</div>
+                <div className="opacity-80">
+                  {getMediaLabel(media)}
+                  {formatFileSize(media.sizeBytes) ? ` • ${formatFileSize(media.sizeBytes)}` : ""}
+                </div>
+              </div>
+            </a>
+          )}
+          {renderDownloadCard(media)}
+        </div>
+      );
+    }
+
+    return (
+      <div className="mb-2">
+        {renderDownloadCard(media)}
+      </div>
+    );
+  };
+
+  const mediaContent = renderMedia(media);
 
   return (
     <div
@@ -156,42 +386,9 @@ export function MessageBubble({
           </button>
         )}
 
-        {mediaUrl && (
-          <div className="mb-2">
-            {isImage ? (
-              <img
-                src={mediaUrl}
-                alt={mediaFilename || "Message attachment"}
-                className="rounded-md max-w-[320px] w-full h-auto"
-                data-testid="message-image"
-              />
-            ) : (
-              <a
-                href={mediaUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`flex items-center gap-3 rounded-md border px-3 py-2 text-sm transition hover:brightness-95 ${
-                  isOutgoing ? "border-primary-foreground/30" : "border-border"
-                }`}
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                  <FileText className="h-5 w-5" />
-                </div>
-                <div className="flex-1 overflow-hidden">
-                  <div className="truncate font-medium">
-                    {mediaFilename || "Attachment"}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {isDocument ? "Document" : isVideo ? "Video" : isAudio ? "Audio" : "File"}
-                  </div>
-                </div>
-                <Download className="h-4 w-4" />
-              </a>
-            )}
-          </div>
-        )}
-        
-        {message.body && (
+        {mediaContent}
+
+        {message.body?.trim() && (
           <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">
             {message.body}
           </p>
