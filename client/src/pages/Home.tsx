@@ -16,6 +16,7 @@ import { type ChatMessage } from "@/types/messages";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { cn } from "@/lib/utils";
 import { ConversationInfoDrawer } from "@/components/chat/ConversationInfoDrawer";
+import { useUnreadCounts } from "@/hooks/use-unread-counts";
 
 const MAX_PINNED_CONVERSATIONS = 10;
 
@@ -35,6 +36,9 @@ export default function Home() {
   const isTablet = useMediaQuery("(min-width: 768px)");
   const isLargeDesktop = useMediaQuery("(min-width: 1200px)");
 
+  // Initialize unread counts management
+  const { incrementUnread } = useUnreadCounts(selectedConversationId);
+
   const handleWebSocketMessage = useCallback((event: string, data: any) => {
     if (
       event === "message_incoming" ||
@@ -47,6 +51,11 @@ export default function Home() {
         queryClient.invalidateQueries({
           queryKey: ["/api/conversations", data.conversationId, "messages"],
         });
+        
+        // Increment unread count for incoming messages only
+        if (event === "message_incoming") {
+          incrementUnread(data.conversationId);
+        }
       }
     }
 

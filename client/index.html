@@ -2,7 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <style>
+      /* Prevent scroll bounce and ensure proper mobile height */
+      html, body {
+        overscroll-behavior: none;
+        height: 100%;
+        height: 100dvh;
+        overflow: hidden;
+      }
+      /* Ensure proper safe area insets */
+      :root {
+        --sat: env(safe-area-inset-top);
+        --sab: env(safe-area-inset-bottom);
+        --sal: env(safe-area-inset-left);
+        --sar: env(safe-area-inset-right);
+      }
+    </style>
     <title>WhatsApp Web</title>
     <meta name="description" content="WhatsApp Web-style chat application with real-time messaging, conversation management, and WhatsApp API integration">
     <link rel="preconnect" href="https://fonts.googleapis.com">

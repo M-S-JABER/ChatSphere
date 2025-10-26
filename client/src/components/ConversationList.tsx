@@ -2,6 +2,8 @@ import { useMemo, useRef, useState, type ReactNode } from "react";
 import { type Conversation } from "@shared/schema";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { UnreadDot } from "@/components/ui/unread-dot";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -179,11 +181,16 @@ export function ConversationList({
         )}
         data-testid={`conversation-row-${conv.id}`}
       >
-        <Avatar className="h-11 w-11 flex-shrink-0">
-          <AvatarFallback className="bg-primary/15 text-sm font-semibold text-primary">
-            {getInitials(conv)}
-          </AvatarFallback>
-        </Avatar>
+        <div className="relative">
+          <Avatar className="h-11 w-11 flex-shrink-0">
+            <AvatarFallback className="bg-primary/15 text-sm font-semibold text-primary">
+              {getInitials(conv)}
+            </AvatarFallback>
+          </Avatar>
+          <AnimatePresence>
+            {unreadCount > 0 && <UnreadDot position="top-right" size="sm" />}
+          </AnimatePresence>
+        </div>
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -216,11 +223,20 @@ export function ConversationList({
             <p className="line-clamp-1 flex-1 text-[13px] text-muted-foreground">
               {renderSnippet(snippet, searchQuery)}
             </p>
-            {unreadCount > 0 && (
-              <span className="flex h-5 min-w-[22px] items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground">
-                {unreadCount > 99 ? "99+" : unreadCount}
-              </span>
-            )}
+            <AnimatePresence>
+              {unreadCount > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  className="relative"
+                >
+                  <span className="absolute right-0 flex h-5 min-w-[22px] -translate-y-1/2 translate-x-1/2 items-center justify-center rounded-full bg-primary/90 text-[11px] font-semibold text-primary-foreground shadow-sm backdrop-blur-sm">
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
 

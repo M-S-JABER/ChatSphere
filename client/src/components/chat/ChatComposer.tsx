@@ -399,7 +399,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
         </div>
       )}
 
-      <div className="flex items-end gap-2">
+  <div className="flex items-center gap-2">
         <div className="flex flex-1 items-center gap-2 rounded-3xl border border-border/60 bg-background/70 px-3 py-2">
           <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
             <PopoverTrigger asChild>
