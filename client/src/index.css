@@ -4,6 +4,8 @@
 
 /* LIGHT MODE */
 :root {
+  --app-viewport-height: 100vh;
+  --chat-thread-wallpaper: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22 viewBox=%220 0 40 40%22%3E%3Cpath fill=%22%23f2f5f3%22 d=%22M0 39.558h40V40H0zM0 0h.442V40H0z%22/%3E%3C/svg%3E");
   --button-outline: rgba(0,0,0, .10);
   --badge-outline: rgba(0,0,0, .05);
 
@@ -123,6 +125,8 @@
 }
 
 .dark {
+  --app-viewport-height: 100vh;
+  --chat-thread-wallpaper: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22 viewBox=%220 0 40 40%22%3E%3Cpath fill=%22%23182229%22 d=%22M0 39.558h40V40H0zM0 0h.442V40H0z%22/%3E%3C/svg%3E");
   --button-outline: rgba(255,255,255, .10);
   --badge-outline: rgba(255,255,255, .05);
 
@@ -214,6 +218,17 @@
 }
 
 @layer base {
+  html,
+  body {
+    min-height: var(--app-viewport-height);
+  }
+
+  #root {
+    min-height: var(--app-viewport-height);
+    display: flex;
+    flex-direction: column;
+  }
+
   * {
     @apply border-border;
   }
@@ -221,6 +236,13 @@
   body {
     @apply font-sans antialiased bg-background text-foreground;
   }
+}
+
+.app-shell {
+  min-height: var(--app-viewport-height);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
 }
 
 /**

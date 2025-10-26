@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { type Conversation } from "@shared/schema";
@@ -13,21 +13,36 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 import { Settings } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { type ChatMessage } from "@/types/messages";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { cn } from "@/lib/utils";
+import { ConversationInfoDrawer } from "@/components/chat/ConversationInfoDrawer";
 
 const MAX_PINNED_CONVERSATIONS = 10;
+
+type MobilePanel = "list" | "conversation";
 
 export default function Home() {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [pendingPinId, setPendingPinId] = useState<string | null>(null);
+  const [isInfoDrawerOpen, setIsInfoDrawerOpen] = useState(false);
+  const [activeMobilePanel, setActiveMobilePanel] = useState<MobilePanel>("list");
+
   const { toast } = useToast();
   const { user } = useAuth();
   const canDeleteMessages = user?.role === "admin";
 
+  const isTablet = useMediaQuery("(min-width: 768px)");
+  const isLargeDesktop = useMediaQuery("(min-width: 1200px)");
+
   const handleWebSocketMessage = useCallback((event: string, data: any) => {
-    if (event === "message_incoming" || event === "message_outgoing" || event === "message_media_updated") {
+    if (
+      event === "message_incoming" ||
+      event === "message_outgoing" ||
+      event === "message_media_updated"
+    ) {
       queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
-      
+
       if (data.conversationId) {
         queryClient.invalidateQueries({
           queryKey: ["/api/conversations", data.conversationId, "messages"],
@@ -64,8 +79,11 @@ export default function Home() {
     },
   });
 
-  const conversations = conversationsData?.items || [];
-  const selectedConversation = conversations.find((c) => c.id === selectedConversationId) || null;
+  const conversations = conversationsData?.items ?? [];
+  const selectedConversation = useMemo(
+    () => conversations.find((conversation) => conversation.id === selectedConversationId) ?? null,
+    [conversations, selectedConversationId],
+  );
 
   const { data: pinnedData } = useQuery<{
     pins: Array<{ conversationId: string; pinnedAt: string }>;
@@ -79,15 +97,15 @@ export default function Home() {
 
   const pinnedConversationIds = pinnedData?.pins?.map((pin) => pin.conversationId) ?? [];
 
-  const { data: messagesData, isLoading: messagesLoading } = useQuery<{
-    total: number;
-    items: ChatMessage[];
-  }>({
+  const {
+    data: messagesData,
+    isLoading: messagesLoading,
+  } = useQuery<{ total: number; items: ChatMessage[] }>({
     queryKey: ["/api/conversations", selectedConversationId, "messages"],
-    enabled: !!selectedConversationId,
+    enabled: Boolean(selectedConversationId),
   });
 
-  const messages = messagesData?.items || [];
+  const messages = messagesData?.items ?? [];
 
   const sendMessageMutation = useMutation({
     mutationFn: async ({
@@ -139,8 +157,8 @@ export default function Home() {
       queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
       toast({
         title: variables.archived ? "Conversation archived" : "Conversation unarchived",
-        description: variables.archived 
-          ? "The conversation has been moved to archived" 
+        description: variables.archived
+          ? "The conversation has been moved to archived"
           : "The conversation has been restored to active",
       });
     },
@@ -208,21 +226,13 @@ export default function Home() {
     onMutate: ({ conversationId }) => {
       setPendingPinId(conversationId);
     },
-    onSuccess: (data: any, variables) => {
+    onSuccess: (data: any) => {
       if (data?.pins) {
         queryClient.setQueryData(["/api/conversations/pins"], data);
       } else {
         queryClient.invalidateQueries({ queryKey: ["/api/conversations/pins"] });
       }
-
       queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
-
-      toast({
-        title: variables.pinned ? "Conversation pinned" : "Conversation unpinned",
-        description: variables.pinned
-          ? "This chat is now pinned to the top."
-          : "The chat has been removed from your pinned list.",
-      });
     },
     onError: (error: Error) => {
       toast({
@@ -236,23 +246,6 @@ export default function Home() {
     },
   });
 
-  const handleSendMessage = async (
-    body: string,
-    mediaUrl?: string,
-    replyToMessageId?: string | null,
-  ) => {
-    if (!selectedConversation) {
-      throw new Error("No conversation selected");
-    }
-    await sendMessageMutation.mutateAsync({
-      to: selectedConversation.phone,
-      body,
-      mediaUrl,
-      conversationId: selectedConversation.id,
-      replyToMessageId: replyToMessageId ?? undefined,
-    });
-  };
-
   const createConversationMutation = useMutation({
     mutationFn: async ({ phone, body }: { phone: string; body?: string }) => {
       const res = await apiRequest("POST", "/api/conversations", { phone });
@@ -262,6 +255,9 @@ export default function Home() {
       queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
       if (data.conversation?.id) {
         setSelectedConversationId(data.conversation.id);
+        if (!isTablet) {
+          setActiveMobilePanel("conversation");
+        }
       }
       const trimmedBody = variables.body?.trim();
       if (trimmedBody && data.conversation?.id) {
@@ -281,13 +277,26 @@ export default function Home() {
     },
   });
 
-  const handleCreateConversation = (payload: { phone: string; body?: string }) => {
-    createConversationMutation.mutate(payload);
-  };
+  useEffect(() => {
+    if (!isLargeDesktop) {
+      setIsInfoDrawerOpen(false);
+    }
+  }, [isLargeDesktop]);
 
-  const handleDeleteConversation = async () => {
-    if (!selectedConversation) return;
-    await deleteConversationMutation.mutateAsync(selectedConversation.id);
+  useEffect(() => {
+    if (!selectedConversationId) {
+      setIsInfoDrawerOpen(false);
+      if (!isTablet) {
+        setActiveMobilePanel("list");
+      }
+    }
+  }, [selectedConversationId, isTablet]);
+
+  const handleSelectConversation = (conversationId: string) => {
+    setSelectedConversationId(conversationId);
+    if (!isTablet) {
+      setActiveMobilePanel("conversation");
+    }
   };
 
   const handleTogglePinConversation = (conversation: Conversation, willPin: boolean) => {
@@ -307,56 +316,184 @@ export default function Home() {
     pinMutation.mutate({ conversationId: conversation.id, pinned: willPin });
   };
 
+  const handleSendMessage = async (
+    body: string,
+    mediaUrl?: string,
+    replyToMessageId?: string | null,
+  ) => {
+    if (!selectedConversation) {
+      throw new Error("No conversation selected");
+    }
+    await sendMessageMutation.mutateAsync({
+      to: selectedConversation.phone,
+      body,
+      mediaUrl,
+      conversationId: selectedConversation.id,
+    replyToMessageId: replyToMessageId ?? undefined,
+  });
+  };
+
+  const handleDeleteConversation = async () => {
+    if (!selectedConversation) return;
+    await deleteConversationMutation.mutateAsync(selectedConversation.id);
+  };
+
+  const headerActions = (
+    <div className="flex items-center gap-1.5">
+      <Button
+        variant="ghost"
+        size="icon"
+        asChild
+        className="text-muted-foreground hover:text-foreground"
+        aria-label="Open settings"
+        data-testid="button-settings"
+      >
+        <Link href="/settings">
+          <Settings className="h-5 w-5" />
+        </Link>
+      </Button>
+      <ThemeToggle />
+      <UserMenu />
+    </div>
+  );
+
+  const gridTemplate = isTablet
+    ? cn(
+        "grid h-full min-h-0 w-full overflow-hidden rounded-none bg-card/95 backdrop-blur shadow-xl shadow-black/5 supports-[backdrop-filter]:bg-card/90 md:rounded-[28px]",
+        isLargeDesktop && isInfoDrawerOpen && selectedConversation
+          ? "grid-cols-[360px_minmax(0,1fr)_340px]"
+          : "grid-cols-[360px_minmax(0,1fr)]",
+      )
+    : "flex h-full min-h-0 flex-col overflow-hidden rounded-none bg-card/95 backdrop-blur shadow-xl shadow-black/5 supports-[backdrop-filter]:bg-card/90 md:rounded-[28px]";
+
+  const infoDrawerShouldRender = Boolean(selectedConversation);
+
   return (
-    <div className="flex h-screen w-full overflow-hidden">
-      <div className="w-full lg:w-[420px] flex-shrink-0">
-        <ConversationList
-          conversations={conversations}
-          selectedId={selectedConversationId}
-          onSelect={setSelectedConversationId}
-          isLoading={conversationsLoading}
-          showArchived={showArchived}
-          onToggleArchived={() => setShowArchived(!showArchived)}
-          onArchive={(id, archived) => archiveMutation.mutate({ id, archived })}
-          onCreateConversation={handleCreateConversation}
-          pinnedConversationIds={pinnedConversationIds}
-          onTogglePin={handleTogglePinConversation}
-          pinningConversationId={pendingPinId}
-          maxPinned={MAX_PINNED_CONVERSATIONS}
-        />
-      </div>
+    <div className="relative flex flex-1 min-h-0 w-full overflow-hidden bg-[#111b21] text-foreground">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-36 bg-gradient-to-b from-emerald-500/30 to-transparent" />
+      <div className="relative z-10 flex min-h-0 flex-1 overflow-hidden px-0 py-0 md:px-4 md:py-6">
+        {isTablet ? (
+          <div className={gridTemplate}>
+            <ConversationList
+              conversations={conversations}
+              selectedId={selectedConversationId}
+              onSelect={handleSelectConversation}
+              isLoading={conversationsLoading}
+              showArchived={showArchived}
+              onToggleArchived={() => setShowArchived((value) => !value)}
+              onArchive={(id, archived) => archiveMutation.mutate({ id, archived })}
+              onCreateConversation={createConversationMutation.mutate}
+              pinnedConversationIds={pinnedConversationIds}
+              onTogglePin={handleTogglePinConversation}
+              maxPinned={MAX_PINNED_CONVERSATIONS}
+              pinningConversationId={pendingPinId}
+              headerActions={headerActions}
+              sidebarTitle="Chats"
+              currentUserName={user?.username ?? "You"}
+            />
 
-      <div className="flex-1 relative">
-        <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
-          <Link href="/settings">
-            <Button variant="ghost" size="icon" data-testid="button-settings">
-              <Settings className="h-5 w-5" />
-            </Button>
-          </Link>
-          <ThemeToggle />
-          <UserMenu />
-        </div>
-        <MessageThread
-          conversation={selectedConversation}
-          messages={messages}
-          onSendMessage={handleSendMessage}
-          isLoading={messagesLoading}
-          isSending={sendMessageMutation.isPending}
-          canManageMessages={canDeleteMessages}
-          onDeleteMessage={
-            canDeleteMessages
-              ? (messageId: string) => deleteMessageMutation.mutateAsync(messageId)
-              : undefined
-          }
-          deletingMessageId={deleteMessageMutation.variables ?? null}
-          isDeletingMessage={deleteMessageMutation.isPending}
-          onDeleteConversation={
-            canDeleteMessages && selectedConversation ? handleDeleteConversation : undefined
-          }
-          isDeletingConversation={deleteConversationMutation.isPending}
-        />
-      </div>
+            <div className="flex min-h-0 flex-col border-r border-border/60">
+              <MessageThread
+                conversation={selectedConversation}
+                messages={messages}
+                onSendMessage={handleSendMessage}
+                isLoading={messagesLoading}
+                isSending={sendMessageMutation.isPending}
+                canManageMessages={canDeleteMessages}
+                onDeleteMessage={
+                  canDeleteMessages
+                    ? (messageId: string) => deleteMessageMutation.mutateAsync(messageId)
+                    : undefined
+                }
+                deletingMessageId={deleteMessageMutation.variables ?? null}
+                isDeletingMessage={deleteMessageMutation.isPending}
+                onDeleteConversation={
+                  canDeleteMessages && selectedConversation ? handleDeleteConversation : undefined
+                }
+                isDeletingConversation={deleteConversationMutation.isPending}
+                showMobileHeader={!isTablet}
+                headerActions={headerActions}
+                onToggleInfoDrawer={setIsInfoDrawerOpen}
+                isInfoDrawerOpen={isInfoDrawerOpen}
+              />
+            </div>
 
+            {isLargeDesktop && infoDrawerShouldRender && isInfoDrawerOpen && (
+              <ConversationInfoDrawer
+                conversation={selectedConversation}
+                messages={messages}
+                isOpen={isInfoDrawerOpen}
+                onClose={() => setIsInfoDrawerOpen(false)}
+                mode="desktop"
+              />
+            )}
+            {!isLargeDesktop && (
+              <ConversationInfoDrawer
+                conversation={selectedConversation}
+                messages={messages}
+                isOpen={isInfoDrawerOpen && infoDrawerShouldRender}
+                onClose={() => setIsInfoDrawerOpen(false)}
+                mode="overlay"
+              />
+            )}
+          </div>
+        ) : (
+          <div className={gridTemplate}>
+            {activeMobilePanel === "list" ? (
+              <ConversationList
+                conversations={conversations}
+                selectedId={selectedConversationId}
+                onSelect={handleSelectConversation}
+                isLoading={conversationsLoading}
+                showArchived={showArchived}
+                onToggleArchived={() => setShowArchived((value) => !value)}
+                onArchive={(id, archived) => archiveMutation.mutate({ id, archived })}
+                onCreateConversation={createConversationMutation.mutate}
+                pinnedConversationIds={pinnedConversationIds}
+                onTogglePin={handleTogglePinConversation}
+                maxPinned={MAX_PINNED_CONVERSATIONS}
+                pinningConversationId={pendingPinId}
+                headerActions={headerActions}
+                sidebarTitle="Chats"
+                currentUserName={user?.username ?? "You"}
+              />
+            ) : (
+              <MessageThread
+                conversation={selectedConversation}
+                messages={messages}
+                onSendMessage={handleSendMessage}
+                isLoading={messagesLoading}
+                isSending={sendMessageMutation.isPending}
+                canManageMessages={canDeleteMessages}
+                onDeleteMessage={
+                  canDeleteMessages
+                    ? (messageId: string) => deleteMessageMutation.mutateAsync(messageId)
+                    : undefined
+                }
+                deletingMessageId={deleteMessageMutation.variables ?? null}
+                isDeletingMessage={deleteMessageMutation.isPending}
+                onDeleteConversation={
+                  canDeleteMessages && selectedConversation ? handleDeleteConversation : undefined
+                }
+                isDeletingConversation={deleteConversationMutation.isPending}
+                onBackToList={() => setActiveMobilePanel("list")}
+                showMobileHeader
+                headerActions={headerActions}
+                onToggleInfoDrawer={setIsInfoDrawerOpen}
+                isInfoDrawerOpen={isInfoDrawerOpen}
+              />
+            )}
+
+            <ConversationInfoDrawer
+              conversation={selectedConversation}
+              messages={messages}
+              isOpen={activeMobilePanel === "conversation" && isInfoDrawerOpen && infoDrawerShouldRender}
+              onClose={() => setIsInfoDrawerOpen(false)}
+              mode="compact"
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,18 +1,24 @@
-import { useState } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { type Conversation } from "@shared/schema";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Search, Archive, ArchiveRestore, MoreVertical, Pin, Loader2 } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Skeleton } from "@/components/ui/skeleton";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Archive, ArchiveRestore, BellOff, Loader2, MoreVertical, Pin, Search } from "lucide-react";
+import { formatDistanceToNowStrict } from "date-fns";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { NewConversationDialog } from "@/components/NewConversationDialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { cn } from "@/lib/utils";
 
-interface ConversationListProps {
+type ConversationListProps = {
   conversations: Conversation[];
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -25,12 +31,82 @@ interface ConversationListProps {
   onTogglePin?: (conversation: Conversation, willPin: boolean) => void;
   maxPinned?: number;
   pinningConversationId?: string | null;
-}
+  headerActions?: ReactNode;
+  sidebarTitle?: string;
+  currentUserName?: string;
+};
 
-export function ConversationList({ 
-  conversations, 
-  selectedId, 
-  onSelect, 
+type ConversationMetadata = {
+  lastMessage?: {
+    body?: string | null;
+    mediaType?: string | null;
+    createdAt?: string | null;
+  };
+  unreadCount?: number;
+  muted?: boolean;
+  labels?: string[];
+};
+
+const formatRelativeTime = (date: string | Date | null | undefined) => {
+  if (!date) return "";
+  try {
+    const parsed = typeof date === "string" ? new Date(date) : date;
+    return formatDistanceToNowStrict(parsed, { addSuffix: false });
+  } catch {
+    return "";
+  }
+};
+
+const extractMetadata = (conv: Conversation): ConversationMetadata => {
+  if (!conv.metadata || typeof conv.metadata !== "object") return {};
+  return conv.metadata as ConversationMetadata;
+};
+
+const resolveSnippet = (conv: Conversation) => {
+  const metadata = extractMetadata(conv);
+  const lastMessage = metadata?.lastMessage;
+  if (lastMessage?.body) {
+    return lastMessage.body;
+  }
+  if (lastMessage?.mediaType) {
+    if (lastMessage.mediaType === "image") return "Photo";
+    if (lastMessage.mediaType === "video") return "Video";
+    if (lastMessage.mediaType === "audio") return "Audio";
+    return "Attachment";
+  }
+  return conv.phone;
+};
+
+const getDisplayName = (conv: Conversation) => conv.displayName || conv.phone;
+
+const getInitials = (conv: Conversation) => {
+  const label = conv.displayName || conv.phone || "?";
+  return label.slice(0, 2).toUpperCase();
+};
+
+const renderSnippet = (text: string, query: string) => {
+  if (!query.trim()) return text;
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`(${escaped})`, "ig");
+  const parts = text.split(pattern);
+  const lowered = query.trim().toLowerCase();
+
+  return parts.map((part, index) => {
+    const isMatch = part.toLowerCase() === lowered;
+    return isMatch ? (
+      <mark key={`${part}-${index}`} className="rounded-sm bg-primary/20 px-0.5 text-foreground">
+        {part}
+      </mark>
+    ) : (
+      <span key={`${part}-${index}`}>{part}</span>
+    );
+  });
+};
+
+export function ConversationList({
+  conversations,
+  selectedId,
+  onSelect,
   isLoading,
   showArchived = false,
   onToggleArchived,
@@ -40,312 +116,359 @@ export function ConversationList({
   onTogglePin,
   maxPinned = 10,
   pinningConversationId = null,
+  headerActions,
+  sidebarTitle = "Chats",
+  currentUserName = "You",
 }: ConversationListProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  const listParentRef = useRef<HTMLDivElement>(null);
 
-  const getInitials = (phone: string, name?: string | null) => {
-    if (name) return name.charAt(0).toUpperCase();
-    return phone.charAt(phone.length - 1);
-  };
+  const filteredConversations = useMemo(() => {
+    const trimmed = searchQuery.trim().toLowerCase();
+    if (!trimmed) return conversations;
+    return conversations.filter((conv) => {
+      const display = (conv.displayName ?? "").toLowerCase();
+      const phone = (conv.phone ?? "").toLowerCase();
+      const snippet = resolveSnippet(conv).toLowerCase();
+      return display.includes(trimmed) || phone.includes(trimmed) || snippet.includes(trimmed);
+    });
+  }, [conversations, searchQuery]);
 
-  const getDisplayName = (conv: Conversation) => {
-    return conv.displayName || conv.phone;
-  };
+  const pinnedSet = useMemo(() => new Set(pinnedConversationIds), [pinnedConversationIds]);
+  const pinnedOrdered = useMemo(
+    () =>
+      pinnedConversationIds
+        .map((id) => filteredConversations.find((conv) => conv.id === id))
+        .filter((conv): conv is Conversation => Boolean(conv)),
+    [filteredConversations, pinnedConversationIds],
+  );
 
-  const formatTimestamp = (date: string | Date | null) => {
-    if (!date) return "";
-    try {
-      return formatDistanceToNow(new Date(date), { addSuffix: false });
-    } catch {
-      return "";
-    }
-  };
+  const otherConversations = useMemo(
+    () => filteredConversations.filter((conv) => !pinnedSet.has(conv.id)),
+    [filteredConversations, pinnedSet],
+  );
 
-  const filteredConversations = conversations.filter((conv) => {
-    const trimmedQuery = searchQuery.trim();
-    if (!trimmedQuery) return true;
-    
-    const query = trimmedQuery.toLowerCase();
-    const phone = conv.phone.toLowerCase();
-    const displayName = (conv.displayName || "").toLowerCase();
-    
-    return phone.includes(query) || displayName.includes(query);
+  const virtualizer = useVirtualizer({
+    count: otherConversations.length,
+    getScrollElement: () => listParentRef.current,
+    estimateSize: () => 82,
+    overscan: 8,
   });
 
-  const pinnedSet = new Set(pinnedConversationIds);
-  const pinnedOrdered = pinnedConversationIds
-    .map((id) => filteredConversations.find((conv) => conv.id === id))
-    .filter((conv): conv is Conversation => Boolean(conv));
-  const otherConversations = filteredConversations.filter((conv) => !pinnedSet.has(conv.id));
-  const orderedConversations = [...pinnedOrdered, ...otherConversations];
+  const renderRow = (conv: Conversation, { isPinned }: { isPinned?: boolean }) => {
+    const metadata = extractMetadata(conv);
+    const unreadCount = metadata?.unreadCount ?? 0;
+    const snippet = resolveSnippet(conv);
+    const timestamp =
+      metadata?.lastMessage?.createdAt ?? conv.lastAt ?? conv.updatedAt ?? conv.createdAt;
+    const formattedTime = formatRelativeTime(timestamp);
+    const isSelected = selectedId === conv.id;
 
-  const firstPinnedId = pinnedOrdered[0]?.id;
-  const firstUnpinnedId = otherConversations[0]?.id;
+    return (
+      <button
+        key={conv.id}
+        onClick={() => onSelect(conv.id)}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          if (!onTogglePin) return;
+          onTogglePin(conv, !isPinned);
+        }}
+        className={cn(
+          "group relative flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-start transition hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+          isSelected && "bg-muted/70",
+        )}
+        data-testid={`conversation-row-${conv.id}`}
+      >
+        <Avatar className="h-11 w-11 flex-shrink-0">
+          <AvatarFallback className="bg-primary/15 text-sm font-semibold text-primary">
+            {getInitials(conv)}
+          </AvatarFallback>
+        </Avatar>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="truncate text-[15px] font-semibold text-foreground">
+              {getDisplayName(conv)}
+            </p>
+            {metadata?.muted && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                    <BellOff className="h-3 w-3" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">Muted chat</TooltipContent>
+              </Tooltip>
+            )}
+            {isPinned && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/20 text-amber-700">
+                    <Pin className="h-3 w-3 -rotate-45" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">Pinned</TooltipContent>
+              </Tooltip>
+            )}
+            <span className="ms-auto text-xs text-muted-foreground">{formattedTime}</span>
+          </div>
+          <div className="mt-1 flex items-center gap-2">
+            <p className="line-clamp-1 flex-1 text-[13px] text-muted-foreground">
+              {renderSnippet(snippet, searchQuery)}
+            </p>
+            {unreadCount > 0 && (
+              <span className="flex h-5 min-w-[22px] items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground">
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-col items-end gap-2">
+          {onTogglePin && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "h-8 w-8 text-muted-foreground opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100",
+                isPinned && "text-amber-600 hover:text-amber-700",
+              )}
+              onClick={(event) => {
+                event.stopPropagation();
+                onTogglePin(conv, !isPinned);
+              }}
+              disabled={pinningConversationId === conv.id}
+              aria-label={isPinned ? "Unpin chat" : "Pin chat"}
+            >
+              {pinningConversationId === conv.id ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Pin className={cn("h-4 w-4 transition", isPinned ? "-rotate-45" : "rotate-0")} />
+              )}
+            </Button>
+          )}
+
+          {(onArchive || onTogglePin) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100"
+                  onClick={(event) => event.stopPropagation()}
+                  aria-label="Conversation options"
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                {onTogglePin && (
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      onTogglePin(conv, !isPinned);
+                    }}
+                  >
+                    {isPinned ? "Unpin chat" : "Pin chat"}
+                  </DropdownMenuItem>
+                )}
+                {onArchive && (
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      onArchive(conv.id, !conv.archived);
+                    }}
+                  >
+                    {conv.archived ? (
+                      <>
+                        <ArchiveRestore className="mr-2 h-4 w-4" />
+                        Unarchive
+                      </>
+                    ) : (
+                      <>
+                        <Archive className="mr-2 h-4 w-4" />
+                        Archive
+                      </>
+                    )}
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+      </button>
+    );
+  };
 
   if (isLoading) {
     return (
-      <div className="flex flex-col h-screen border-r border-border bg-card">
-        <div className="p-4 border-b border-border">
+      <div className="flex h-full flex-col border-r border-border bg-card/90">
+        <div className="border-b border-border/70 px-5 py-4">
           <div className="flex items-center gap-3">
             <Skeleton className="h-10 w-10 rounded-full" />
-            <Skeleton className="h-5 w-32" />
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-3 w-20" />
+            </div>
           </div>
         </div>
-        <div className="p-3">
-          <Skeleton className="h-10 w-full rounded-lg" />
+        <div className="px-5 py-3">
+          <Skeleton className="h-9 w-full rounded-full" />
         </div>
-        <div className="flex-1 p-2 space-y-1">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="p-3 space-y-2">
-              <div className="flex gap-3">
-                <Skeleton className="h-12 w-12 rounded-full flex-shrink-0" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-32" />
-                  <Skeleton className="h-3 w-48" />
-                </div>
-              </div>
-            </div>
+        <div className="flex-1 space-y-3 overflow-hidden px-4 py-3">
+          {[1, 2, 3, 4, 5].map((item) => (
+            <Skeleton key={item} className="h-16 w-full rounded-2xl" />
           ))}
         </div>
       </div>
     );
   }
 
+  const emptyState = (
+    <div className="flex h-full flex-col items-center justify-center px-6 text-center text-sm text-muted-foreground">
+      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+        <Search className="h-8 w-8 text-muted-foreground" />
+      </div>
+      <p className="mt-4 font-medium">
+        {searchQuery.trim()
+          ? `No chats matching “${searchQuery}”`
+          : showArchived
+          ? "No archived chats yet"
+          : "No conversations yet"}
+      </p>
+      <p className="mt-2 text-xs">
+        {searchQuery.trim()
+          ? "Try refining your search keywords."
+          : showArchived
+          ? "Archived chats will appear here."
+          : "Create a new conversation to get started."}
+      </p>
+    </div>
+  );
+
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="flex flex-col h-screen border-r border-border bg-card">
-      <div className="p-4 border-b border-border space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-xl font-medium text-foreground">Messages</h1>
-          <div className="flex items-center gap-2">
-            {onCreateConversation && (
-              <NewConversationDialog
-                onCreateConversation={onCreateConversation}
-                triggerClassName="h-9 px-3"
+      <div className="flex h-full min-h-0 flex-col border-r border-border/70 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+        <div className="border-b border-border/60 px-5 py-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <Avatar className="h-10 w-10">
+                <AvatarFallback className="bg-primary/10 text-sm font-semibold text-primary">
+                  {currentUserName.slice(0, 2).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              <div>
+                <p className="text-sm font-semibold text-foreground">{currentUserName}</p>
+                <p className="text-xs text-muted-foreground">{sidebarTitle}</p>
+              </div>
+            </div>
+            {headerActions ? (
+              <div className="flex items-center gap-2">{headerActions}</div>
+            ) : null}
+          </div>
+          <div className="mt-4 space-y-3">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search or start new chat"
+                className="h-10 w-full rounded-full border border-border/70 bg-background/90 pl-10 text-sm shadow-none focus-visible:ring-2 focus-visible:ring-primary"
+                data-testid="input-search-conversations"
               />
-            )}
-            {onToggleArchived && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onToggleArchived}
-                className="gap-2"
-                data-testid="button-toggle-archived"
-              >
-                {showArchived ? (
-                  <>
-                    <ArchiveRestore className="h-4 w-4" />
-                    <span className="text-sm">Active</span>
-                  </>
-                ) : (
-                  <>
-                    <Archive className="h-4 w-4" />
-                    <span className="text-sm">Archived</span>
-                  </>
-                )}
-              </Button>
-            )}
-          </div>
-        </div>
-        {showArchived && (
-          <div className="mt-2">
-            <Badge variant="secondary" className="text-xs">
-              Viewing Archived Conversations
-            </Badge>
-          </div>
-        )}
-      </div>
-
-      <div className="p-3">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            type="search"
-            placeholder="Search or start new chat"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 bg-secondary border-none rounded-lg h-10"
-            data-testid="input-search-conversations"
-          />
-        </div>
-      </div>
-
-      <ScrollArea className="flex-1">
-        {orderedConversations.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-8 text-center">
-            <div className="w-16 h-16 rounded-full bg-secondary flex items-center justify-center mb-4">
-              {searchQuery.trim() ? (
-                <Search className="h-8 w-8 text-muted-foreground" />
-              ) : showArchived ? (
-                <Archive className="h-8 w-8 text-muted-foreground" />
-              ) : (
-                <Search className="h-8 w-8 text-muted-foreground" />
+            </div>
+            <div className="flex items-center gap-2">
+              {onCreateConversation && (
+                <NewConversationDialog
+                  onCreateConversation={onCreateConversation}
+                  triggerClassName="h-9 flex-1 justify-center rounded-full"
+                />
+              )}
+              {onToggleArchived && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onToggleArchived}
+                  className="h-9 rounded-full border border-border/70 px-3 text-sm"
+                  data-testid="button-toggle-archived"
+                >
+                  {showArchived ? (
+                    <>
+                      <ArchiveRestore className="mr-2 h-4 w-4" />
+                      Active
+                    </>
+                  ) : (
+                    <>
+                      <Archive className="mr-2 h-4 w-4" />
+                      Archived
+                    </>
+                  )}
+                </Button>
               )}
             </div>
-            <p className="text-sm text-muted-foreground">
-              {searchQuery.trim() 
-                ? "No conversations found"
-                : showArchived 
-                ? "No archived conversations" 
-                : "No conversations yet"}
-            </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {searchQuery.trim()
-                ? `No results for "${searchQuery}"`
-                : showArchived 
-                ? "Archived conversations will appear here" 
-                : "Send a message to start chatting"}
-            </p>
           </div>
-        ) : (
-          <div className="p-2 space-y-1">
-            {orderedConversations.map((conv) => {
-              const isPinned = pinnedSet.has(conv.id);
-              const showPinnedLabel = isPinned && conv.id === firstPinnedId;
-              const showOthersLabel = !isPinned && firstUnpinnedId === conv.id && pinnedOrdered.length > 0;
-              const pinLimitReachedForThisChat = !isPinned && pinnedOrdered.length >= maxPinned;
+          {showArchived && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Badge variant="secondary" className="rounded-full text-[11px] uppercase tracking-wide">
+                Viewing archived chats
+              </Badge>
+            </div>
+          )}
+        </div>
 
-              return (
-                <div key={conv.id} className="space-y-1">
-                  {showPinnedLabel && (
-                    <div className="px-3 pt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Pinned
-                    </div>
-                  )}
-                  {showOthersLabel && (
-                    <div className="px-3 pt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      All chats
-                    </div>
-                  )}
-
-                  <div className="relative group">
-                    <button
-                      onClick={() => onSelect(conv.id)}
-                      className={`w-full p-3 pr-16 rounded-lg hover-elevate active-elevate-2 text-left transition-colors ${
-                        selectedId === conv.id ? "bg-sidebar-accent" : ""
-                      } ${isPinned ? "ring-1 ring-amber-400/40" : ""}`}
-                      data-testid={`button-conversation-${conv.id}`}
-                    >
-                      <div className="flex gap-3">
-                        <Avatar className="h-12 w-12 flex-shrink-0">
-                          <AvatarFallback className="bg-primary text-primary-foreground font-medium text-base">
-                            {getInitials(conv.phone, conv.displayName)}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start gap-2 mb-1">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <h3 className="font-medium text-foreground truncate text-base">
-                                {getDisplayName(conv)}
-                              </h3>
-                              {isPinned && (
-                                <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600">
-                                  Pinned
-                                </span>
-                              )}
-                            </div>
-                            {conv.lastAt && (
-                              <span className="ml-auto text-xs text-muted-foreground flex-shrink-0">
-                                {formatTimestamp(conv.lastAt)}
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-sm text-muted-foreground font-mono truncate">
-                            {conv.phone}
-                          </p>
-                        </div>
-                      </div>
-                    </button>
-
-                    <div className="absolute right-2 top-2 flex items-center gap-1">
-                      {onTogglePin && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className={`h-8 w-8 transition-all ${
-                                isPinned
-                                  ? "text-amber-600 hover:text-amber-700 hover:bg-amber-500/20 bg-amber-500/15"
-                                  : "text-muted-foreground hover:text-primary"
-                              }`}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onTogglePin(conv, !isPinned);
-                              }}
-                              disabled={pinningConversationId === conv.id}
-                              aria-disabled={pinLimitReachedForThisChat}
-                              aria-pressed={isPinned}
-                              aria-label={isPinned ? `Unpin ${getDisplayName(conv)}` : `Pin ${getDisplayName(conv)}`}
-                              data-testid={`button-pin-${conv.id}`}
-                            >
-                              {pinningConversationId === conv.id ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Pin
-                                  className={`h-4 w-4 transition-transform duration-200 ${
-                                    isPinned ? "-rotate-45" : "rotate-0"
-                                  }`}
-                                />
-                              )}
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent side="left">
-                            <p>
-                              {isPinned
-                                ? "Unpin chat"
-                                : pinLimitReachedForThisChat
-                                ? `Pin chat (limit ${maxPinned})`
-                                : "Pin chat"}
-                            </p>
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
-
-                      {onArchive && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              data-testid={`button-conversation-menu-${conv.id}`}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onArchive(conv.id, !conv.archived);
-                              }}
-                              data-testid={`button-archive-${conv.id}`}
-                            >
-                              {conv.archived ? (
-                                <>
-                                  <ArchiveRestore className="mr-2 h-4 w-4" />
-                                  <span>Unarchive</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Archive className="mr-2 h-4 w-4" />
-                                  <span>Archive</span>
-                                </>
-                              )}
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      )}
-                    </div>
+        <div className="flex-1 min-h-0">
+          <div ref={listParentRef} className="h-full overflow-y-auto">
+            <div className="flex flex-col gap-4 px-4 py-4">
+              {pinnedOrdered.length > 0 && (
+                <div className="space-y-2">
+                  <p className="px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Pinned
+                  </p>
+                  <div className="space-y-2">
+                    {pinnedOrdered.map((conv) => renderRow(conv, { isPinned: true }))}
                   </div>
                 </div>
-              );
-            })}
+              )}
+
+              <div className="space-y-2">
+                {pinnedOrdered.length > 0 && (
+                  <p className="px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    All chats
+                  </p>
+                )}
+
+                {otherConversations.length === 0 ? (
+                  pinnedOrdered.length === 0 ? emptyState : null
+                ) : (
+                  <div
+                    style={{
+                      height: virtualizer.getTotalSize(),
+                      position: "relative",
+                    }}
+                  >
+                    {virtualizer.getVirtualItems().map((virtualRow) => {
+                      const conv = otherConversations[virtualRow.index];
+                      return (
+                        <div
+                          key={conv.id}
+                          data-index={virtualRow.index}
+                          ref={virtualizer.measureElement}
+                          className="absolute left-0 right-0"
+                          style={{
+                            transform: `translateY(${virtualRow.start}px)`,
+                          }}
+                        >
+                          {renderRow(conv, { isPinned: false })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-        )}
-      </ScrollArea>
+          {filteredConversations.length === 0 && emptyState}
+        </div>
       </div>
     </TooltipProvider>
   );

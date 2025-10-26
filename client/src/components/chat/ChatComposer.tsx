@@ -400,85 +400,90 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
       )}
 
       <div className="flex items-end gap-2">
-        <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
-          <PopoverTrigger asChild>
-            <Button
-              size="icon"
-              variant="ghost"
-              type="button"
-              className="flex-shrink-0"
-              disabled={disabled}
-              aria-label="Insert emoji"
-            >
-              <Smile className="h-6 w-6" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent side="top" align="start" className="w-auto border-none p-0 shadow-lg">
-            <EmojiPicker
-              onEmojiClick={handleEmojiClick}
-              searchDisabled={false}
-              skinTonesDisabled
-              width={320}
-              height={380}
-              lazyLoadEmojis
-            />
-          </PopoverContent>
-        </Popover>
+        <div className="flex flex-1 items-center gap-2 rounded-3xl border border-border/60 bg-background/70 px-3 py-2">
+          <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
+            <PopoverTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                type="button"
+                className="flex-shrink-0 text-muted-foreground transition hover:text-primary"
+                disabled={disabled}
+                aria-label="Insert emoji"
+              >
+                <Smile className="h-5 w-5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent side="top" align="start" className="w-auto border-none p-0 shadow-lg">
+              <EmojiPicker
+                onEmojiClick={handleEmojiClick}
+                searchDisabled={false}
+                skinTonesDisabled
+                width={320}
+                height={380}
+                lazyLoadEmojis
+              />
+            </PopoverContent>
+          </Popover>
 
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handleFileInputChange}
-          accept={acceptedTypes.join(",")}
-        />
-
-        <Button
-          size="icon"
-          variant="ghost"
-          type="button"
-          className="flex-shrink-0"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={disabled || attachments.length >= maxFiles}
-          aria-label="Attach files"
-        >
-          <Paperclip className="h-6 w-6" />
-        </Button>
-
-        <div className="relative flex-1">
-          <Textarea
-            ref={textareaRef}
-            value={message}
-            onChange={(event) => {
-              setMessage(event.target.value);
-              requestAnimationFrame(updateSelection);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                handleSend();
-              }
-            }}
-            onSelect={updateSelection}
-            onKeyUp={updateSelection}
-            onClick={updateSelection}
-            onPaste={handlePaste}
-            onDrop={handleDrop}
-            placeholder="Type a message"
-            disabled={disabled}
-            rows={1}
-            className="min-h-[48px] max-h-[160px] resize-none rounded-lg border-none bg-secondary pr-12"
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleFileInputChange}
+            accept={acceptedTypes.join(",")}
           />
+
+          <Button
+            size="icon"
+            variant="ghost"
+            type="button"
+            className="flex-shrink-0 text-muted-foreground transition hover:text-primary"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled || attachments.length >= maxFiles}
+            aria-label="Attach files"
+          >
+            <Paperclip className="h-5 w-5" />
+          </Button>
+
+          <div className="relative flex-1">
+            <Textarea
+              ref={textareaRef}
+              value={message}
+              onChange={(event) => {
+                setMessage(event.target.value);
+                requestAnimationFrame(updateSelection);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  handleSend();
+                }
+              }}
+              onSelect={updateSelection}
+              onKeyUp={updateSelection}
+              onClick={updateSelection}
+              onPaste={handlePaste}
+              onDrop={handleDrop}
+              placeholder="Type a message"
+              disabled={disabled}
+              rows={1}
+              className="min-h-[44px] max-h-[160px] resize-none border-none bg-transparent text-[15px] leading-6 placeholder:text-muted-foreground focus-visible:ring-0"
+            />
+          </div>
         </div>
 
         <Button
           size="icon"
-          variant={isSendDisabled ? "ghost" : "default"}
+          variant="default"
           type="button"
           onClick={handleSend}
           disabled={isSendDisabled}
-          className="flex-shrink-0 rounded-full"
+          className={cn(
+            "flex-shrink-0 h-11 w-11 rounded-full bg-primary text-primary-foreground transition hover:bg-primary/90",
+            isSendDisabled && "opacity-60 hover:bg-primary",
+          )}
         >
           <Send className="h-5 w-5" />
         </Button>

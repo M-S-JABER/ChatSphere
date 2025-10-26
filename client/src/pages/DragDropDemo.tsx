@@ -50,7 +50,7 @@ export default function DragDropDemo() {
         <ChatDropZone
           onDropFiles={handleDropFiles}
           onDropText={handleDropText}
-          className="flex flex-1 flex-col rounded-lg border border-border bg-card"
+          className="flex-1 rounded-lg border border-border bg-card"
         >
           <div className="flex-1 space-y-4 overflow-y-auto p-4">
             <div className="rounded-lg border border-dashed border-border/60 bg-muted/30 p-4 text-sm text-muted-foreground">

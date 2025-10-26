@@ -130,7 +130,7 @@ export function ChatDropZone({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={cn("relative h-full", className)}
+      className={cn("relative flex h-full min-h-0 flex-col", className)}
     >
       {children}
       {isActive && !isTouch && (
