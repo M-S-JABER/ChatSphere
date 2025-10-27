@@ -22,8 +22,11 @@ export const logger = pino({
 
 export const httpLogger = pinoHttp({
   logger,
-  autoLogging: {
-    ignorePaths: ["/health"],
+  customLogLevel: (req, res, err) => {
+    if (req.url === '/health') return 'silent'
+    if (res.statusCode >= 400 && res.statusCode < 500) return 'warn'
+    if (res.statusCode >= 500 || err) return 'error'
+    return 'info'
   },
   genReqId: (req, res) => {
     const headerRequestId =

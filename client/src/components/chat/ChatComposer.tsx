@@ -85,7 +85,7 @@ const revokeAttachmentUrl = (attachment: ComposerAttachment) => {
 };
 
 export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
-  ({
+  function ChatComposer({
     onSend,
     maxFiles = DEFAULT_MAX_FILES,
     maxFileSizeMB = DEFAULT_MAX_FILE_SIZE_MB,
@@ -94,9 +94,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
     className,
     replyTo,
     onClearReply,
-  },
-  ref,
-) => {
+  }, ref) {
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
@@ -356,7 +354,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
 
   return (
     <div
-      className={cn("space-y-3 border-t border-border bg-card/60 p-3", className)}
+      className={cn("flex w-full flex-col gap-3 bg-background px-4 py-3 md:px-6", className)}
       onDrop={handleDrop}
       onDragOver={(event) => {
         if (disabled) return;
@@ -399,95 +397,105 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
         </div>
       )}
 
-  <div className="flex items-center gap-2">
-        <div className="flex flex-1 items-center gap-2 rounded-3xl border border-border/60 bg-background/70 px-3 py-2">
-          <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
-            <PopoverTrigger asChild>
-              <Button
-                size="icon"
-                variant="ghost"
-                type="button"
-                className="flex-shrink-0 text-muted-foreground transition hover:text-primary"
-                disabled={disabled}
-                aria-label="Insert emoji"
-              >
-                <Smile className="h-5 w-5" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent side="top" align="start" className="w-auto border-none p-0 shadow-lg">
-              <EmojiPicker
-                onEmojiClick={handleEmojiClick}
-                searchDisabled={false}
-                skinTonesDisabled
-                width={320}
-                height={380}
-                lazyLoadEmojis
-              />
-            </PopoverContent>
-          </Popover>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={handleFileInputChange}
-            accept={acceptedTypes.join(",")}
-          />
-
-          <Button
-            size="icon"
-            variant="ghost"
-            type="button"
-            className="flex-shrink-0 text-muted-foreground transition hover:text-primary"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={disabled || attachments.length >= maxFiles}
-            aria-label="Attach files"
-          >
-            <Paperclip className="h-5 w-5" />
-          </Button>
-
-          <div className="relative flex-1">
-            <Textarea
-              ref={textareaRef}
-              value={message}
-              onChange={(event) => {
-                setMessage(event.target.value);
-                requestAnimationFrame(updateSelection);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  handleSend();
-                }
-              }}
-              onSelect={updateSelection}
-              onKeyUp={updateSelection}
-              onClick={updateSelection}
-              onPaste={handlePaste}
-              onDrop={handleDrop}
-              placeholder="Type a message"
+      {/* Only one composer block, fixed at bottom, aligned icons, auto-grow textarea, normalized heights */}
+      <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/95 p-2">
+        <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
+          <PopoverTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              type="button"
+              className="h-9 w-9 rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
               disabled={disabled}
-              rows={1}
-              className="min-h-[44px] max-h-[160px] resize-none border-none bg-transparent text-[15px] leading-6 placeholder:text-muted-foreground focus-visible:ring-0"
+              aria-label="Insert emoji"
+            >
+              <Smile className="h-5 w-5" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent side="top" align="start" className="w-auto border-none p-0 shadow-lg">
+            <EmojiPicker
+              onEmojiClick={handleEmojiClick}
+              searchDisabled={false}
+              skinTonesDisabled
+              width={320}
+              height={380}
+              lazyLoadEmojis
             />
-          </div>
+          </PopoverContent>
+        </Popover>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={handleFileInputChange}
+          accept={acceptedTypes.join(",")}
+        />
+
+        <Button
+          size="icon"
+          variant="ghost"
+          type="button"
+          className="h-9 w-9 rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={disabled || attachments.length >= maxFiles}
+          aria-label="Attach files"
+        >
+          <Paperclip className="h-5 w-5" />
+        </Button>
+
+        <div className="flex flex-1 items-center px-2">
+          <Textarea
+            ref={textareaRef}
+            value={message}
+            onChange={(event) => {
+              setMessage(event.target.value);
+              requestAnimationFrame(updateSelection);
+              // Auto-resize logic with normalized heights
+              const textarea = event.target;
+              textarea.style.height = '44px'; // Reset to min height
+              const scrollHeight = Math.min(textarea.scrollHeight, 160);
+              textarea.style.height = `${scrollHeight}px`;
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                handleSend();
+              }
+            }}
+            onSelect={updateSelection}
+            onKeyUp={updateSelection}
+            onClick={updateSelection}
+            onPaste={handlePaste}
+            onDrop={handleDrop}
+            placeholder="Type a message"
+            disabled={disabled}
+            rows={1}
+            className="w-full resize-none border-none bg-transparent py-2 text-[15px] leading-normal placeholder:text-muted-foreground focus-visible:ring-0"
+            style={{
+              minHeight: '44px',
+              maxHeight: '160px',
+              overflow: 'hidden', // Prevent scrollbar during auto-resize
+            }}
+          />
         </div>
 
         <Button
           size="icon"
-          variant="default"
+          variant="ghost"
           type="button"
           onClick={handleSend}
           disabled={isSendDisabled}
           className={cn(
-            "flex-shrink-0 h-11 w-11 rounded-full bg-primary text-primary-foreground transition hover:bg-primary/90",
-            isSendDisabled && "opacity-60 hover:bg-primary",
+            "h-10 w-10 rounded-full bg-primary text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-95",
+            isSendDisabled && "pointer-events-none opacity-60",
           )}
         >
           <Send className="h-5 w-5" />
         </Button>
       </div>
+
       {attachments.length > 0 && (
         <p className="text-xs text-muted-foreground" aria-live="polite">
           {attachments.length} attachment{attachments.length === 1 ? "" : "s"} ready to send.

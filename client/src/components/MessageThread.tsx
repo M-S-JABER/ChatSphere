@@ -661,6 +661,7 @@ export function MessageThread({
         disabled={!conversation}
         className="flex min-h-0 flex-1 flex-col"
       >
+        {/* Only one composer, fixed at bottom. Chat thread scrolls above it. */}
         <div className="relative flex min-h-0 flex-1 flex-col">
           <div
             ref={scrollContainerRef}
@@ -668,11 +669,9 @@ export function MessageThread({
             style={{
               backgroundImage: "var(--chat-thread-wallpaper)",
               backgroundSize: "240px 240px",
-              height: `calc(100dvh - ${composerHeight}px - 56px)`, // 56px for header
-              // Keep the scrollable messages area padded at the bottom so the last
-              // message always sits above the composer. composerHeight is tracked
-              // via a ResizeObserver on the composer container.
-              paddingBottom: `${composerHeight + 16}px`, // Extra padding for visual comfort
+              // Height is 100dvh minus header and composer
+              height: `calc(100dvh - ${composerHeight}px - 56px)`,
+              paddingBottom: `${composerHeight + 16}px`,
             }}
           >
             {timelineItems.length === 0 ? (
@@ -693,7 +692,6 @@ export function MessageThread({
                   const item = timelineItems[virtualItem.index];
                   const isActiveMatch =
                     searchMatches.length > 0 && searchMatches[activeMatchIndex] === virtualItem.index;
-
                   return (
                     <div
                       key={item.key}
@@ -735,7 +733,6 @@ export function MessageThread({
                 })}
               </div>
             )}
-
             <ScrollToBottomButton
               visible={showScrollButton}
               onClick={scrollToBottom}
@@ -743,14 +740,13 @@ export function MessageThread({
             />
           </div>
         </div>
-
+        {/* Composer: only one, fixed at bottom, auto-grow textarea, correct icons, safe-area respected */}
         <div
           ref={composerContainerRef}
-          className="sticky bottom-0 z-20 w-full border-t border-border/60 bg-card/95 px-3 pb-safe pt-3 shadow-[0_-12px_24px_rgba(0,0,0,0.12)] backdrop-blur supports-[backdrop-filter]:bg-card/85 sm:px-6"
+          className="fixed bottom-0 left-0 right-0 z-20 w-full border-t border-border/60 bg-card/95 shadow-[0_-12px_24px_rgba(0,0,0,0.12)] backdrop-blur-md supports-[backdrop-filter]:bg-card/85"
           style={{
-            // Ensure the composer is visible on mobile keyboards
-            position: '-webkit-sticky',
-            transform: 'translate3d(0,0,0)', // Force GPU acceleration
+            paddingBottom: 'env(safe-area-inset-bottom)',
+            transform: 'translate3d(0,0,0)',
           }}
           aria-hidden={false}
         >

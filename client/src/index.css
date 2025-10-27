@@ -221,6 +221,7 @@
   html,
   body {
     min-height: var(--app-viewport-height);
+    overscroll-behavior-y: none;
   }
 
   #root {
@@ -235,6 +236,64 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
+  }
+}
+
+@layer components {
+  /* Chat-specific styles */
+  .chat-composer {
+    @apply transition-all duration-200;
+    max-height: min(40vh, 160px);
+  }
+
+  .chat-message-list {
+    @apply pb-safe;
+    height: calc(100dvh - var(--header-height) - var(--composer-height));
+    --header-height: 56px;
+    --composer-height: 68px;
+  }
+
+  /* Custom scrollbar for chat */
+  .chat-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+  
+  .chat-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  .chat-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .chat-scrollbar::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    border-radius: 3px;
+  }
+
+  /* Fix iOS height issues */
+  @supports (-webkit-touch-callout: none) {
+    .h-screen {
+      height: -webkit-fill-available;
+    }
+  }
+
+  /* Message animations */
+  @keyframes message-appear {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .message-animate-in {
+    animation: message-appear 0.2s ease-out forwards;
   }
 }
 
