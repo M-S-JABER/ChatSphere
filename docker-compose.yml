@@ -15,6 +15,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - todo_network
+    restart: unless-stopped
 
   app:
     build:
@@ -34,8 +37,18 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://chatsphere:chatsphere@db:5432/chatsphere}
     ports:
       - "8080:8080"
+    networks:
+      - todo_network
+    # volumes:
+    #   - ./:/app
     # بدون volumes في الإنتاج. أضفها في التطوير إن أردت hot-reload
     restart: unless-stopped
+
+
+ 
+networks:
+  todo_network:
+    driver: bridge
 
 volumes:
   pgdata:
