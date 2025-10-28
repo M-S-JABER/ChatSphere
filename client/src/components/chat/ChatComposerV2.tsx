@@ -263,26 +263,36 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(
             />
           </Button>
 
-          <div className="relative flex flex-1 items-end px-1 w-full">
+            <div className="relative flex flex-1 items-end px-1 w-full">
             <Textarea
               ref={textareaRef}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
+              onInput={() => {
+              const ta = textareaRef.current;
+              if (!ta) return;
+              // auto-resize with a sensible max height
+              ta.style.height = 'auto';
+              const maxH = 160;
+              ta.style.height = Math.min(ta.scrollHeight, maxH) + 'px';
               }}
-              placeholder="Type a message"
+              onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+              }}
+              placeholder="Type a "
               disabled={disabled}
               rows={1}
               className="min-h-[44px] max-h-[160px] w-full resize-none border-0 bg-transparent p-2 text-base leading-normal placeholder:text-muted-foreground focus-visible:ring-0"
               style={{
-                overflow: message.split('\n').length > 1 ? 'auto' : 'hidden',
+              overflow: message.split('\n').length > 1 ? 'auto' : 'hidden',
+              // ensure the textarea starts at auto height so onInput resizing works predictably
+              height: 'auto',
               }}
             />
-          </div>
+            </div>
 
           <Button
             type="button"

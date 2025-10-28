@@ -415,3 +415,31 @@
     inset: -1px;
   }
 }
+/* === Scrollbar Style (Dark WhatsApp-like) === */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #111b1f; /* خلفية غامقة متناسقة مع الخلفية */
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #1f4037; /* لون داكن مائل للأخضر */
+  border-radius: 10px;
+  border: 2px solid #111b1f; /* يدمج اللون مع الخلفية */
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #2c6a4b; /* أخضر أفتح عند التحويم */
+}
+
+/* لدعم الوضع الفاتح (اختياري) */
+@media (prefers-color-scheme: light) {
+  ::-webkit-scrollbar-track {
+    background: #f1f1f1;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: #c1c1c1;
+  }
+}

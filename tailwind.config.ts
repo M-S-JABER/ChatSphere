@@ -7,7 +7,7 @@ export default {
     extend: {
       borderRadius: {
         lg: ".5625rem", /* 9px */
-        md: ".375rem", /* 6px */
+        md: ".355rem", /* 6px */
         sm: ".1875rem", /* 3px */
       },
       colors: {
@@ -107,4 +107,5 @@ export default {
     },
   },
   plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
+  // require('tailwind-scrollbar')
 } satisfies Config;

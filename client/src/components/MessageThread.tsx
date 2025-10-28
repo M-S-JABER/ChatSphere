@@ -665,7 +665,7 @@ export function MessageThread({
         <div className="relative flex min-h-0 flex-1 flex-col">
           <div
             ref={scrollContainerRef}
-            className="flex-1 overflow-y-auto overscroll-contain scroll-smooth bg-repeat px-2 pt-6 md:px-6"
+            className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-[#2c6a4b] scrollbar-track-[#0f1a1e] hover:scrollbar-thumb-[#367a57]"
             style={{
               backgroundImage: "var(--chat-thread-wallpaper)",
               backgroundSize: "240px 240px",
@@ -743,10 +743,12 @@ export function MessageThread({
         {/* Composer: only one, fixed at bottom, auto-grow textarea, correct icons, safe-area respected */}
         <div
           ref={composerContainerRef}
-          className="fixed bottom-0 left-0 right-0 z-20 w-full border-t border-border/60 bg-card/95 shadow-[0_-12px_24px_rgba(0,0,0,0.12)] backdrop-blur-md supports-[backdrop-filter]:bg-card/85"
+          className="sticky bottom-0 inset-x-0 z-20 w-full border-t border-border/60 bg-card/95 backdrop-blur-md supports-[backdrop-filter]:bg-card/85"
           style={{
-            paddingBottom: 'env(safe-area-inset-bottom)',
-            transform: 'translate3d(0,0,0)',
+            // paddingBottom:  `${composerHeight + 16}px`,
+            paddingBottom:  'env(safe-area-inset-bottom)',
+            marginBottom: '31px', // up to 12px
+            
           }}
           aria-hidden={false}
         >
