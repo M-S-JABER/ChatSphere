@@ -29,7 +29,7 @@ COPY . .
 RUN npm run build
 
 # ---------- Stage 3: runner (خفيـف وآمن) ----------
-FROM node:22-alpine AS runner
+FROM node:24-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 # أمن: نُنشئ مستخدم بدون صلاحيات root
