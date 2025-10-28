@@ -1,0 +1,8 @@
+tunnel: YOUR_TUNNEL_ID
+credentials-file: /root/.cloudflared/YOUR_TUNNEL_ID.json
+
+ingress:
+  - hostname: chatsphere.your-domain.com
+    service: http://127.0.0.1:8080
+  - service: http_status:404
+# cloudflared tunnel run YOUR_TUNNEL_NAME

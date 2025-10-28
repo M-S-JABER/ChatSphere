@@ -1,0 +1,41 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:latest
+    container_name: chatsphere_db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-chatsphere}
+      POSTGRES_USER: ${POSTGRES_USER:-chatsphere}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chatsphere}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chatsphere_app
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # لخيار تشغيل migrations تلقائيًا
+      DB_PUSH_ON_START: "true"
+      NODE_ENV: "production"
+      # مثال على DATABASE_URL بصيغة Postgres الرسمية
+      DATABASE_URL: ${DATABASE_URL:-postgresql://chatsphere:chatsphere@db:5432/chatsphere}
+    ports:
+      - "8080:8080"
+    # بدون volumes في الإنتاج. أضفها في التطوير إن أردت hot-reload
+    restart: unless-stopped
+
+volumes:
+  pgdata:
