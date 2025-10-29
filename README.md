@@ -1,112 +1,279 @@
-# WhatsApp Web-Style Chat Application
+# 💬 ChatSphere — WhatsApp Web-Style Chat Platform
 
-## Overview
+A full-stack WhatsApp Web-style chat application built for **real-time business messaging** using the **Meta Cloud API for WhatsApp Business**.  
+It features a responsive WhatsApp-inspired interface, secure authentication, message threading, media ingestion, webhook diagnostics, and a powerful admin dashboard.
 
-This is a full-stack WhatsApp Web-style chat application for real-time messaging, integrating with **Meta Cloud API WhatsApp Business**. It features a clean, two-panel interface mimicking WhatsApp Web, including conversation management, message threading, archiving, and real-time updates via WebSocket. All conversations and messages are stored in a PostgreSQL database. The application includes a comprehensive statistics dashboard and robust authentication with role-based access control, supporting admin and regular user roles.
+---
 
-## User Preferences
+## 🧭 Table of Contents
 
-Preferred communication style: Simple, everyday language.
+- [Overview](#overview)  
+- [Architecture](#architecture)  
+- [Installation](#installation)  
+- [Environment Configuration](#environment-configuration)  
+- [Run Commands](#run-commands)  
+- [Project Structure](#project-structure)  
+- [Database Schema](#database-schema)  
+- [Media System](#media-system)  
+- [Diagnostics & Debugging](#diagnostics--debugging)  
+- [UI & Design Audit](#ui--design-audit)  
+- [Common Issues](#common-issues)  
+- [Quality Assurance](#quality-assurance)  
+- [License](#license)
 
-## System Architecture
+---
 
-### Frontend Architecture
+## 🏷️ Overview
 
-**Technology Stack:** React with TypeScript, Vite, TanStack Query, Wouter, shadcn/ui (Radix UI), Tailwind CSS.
+ChatSphere is a **React + Node.js** application that replicates WhatsApp Web UX with full backend control and integration to Meta Cloud API for WhatsApp Business.  
+It supports real-time messaging, conversation management, archiving, role-based access, and secure signed media delivery.
 
-**Design System:** WhatsApp Web-inspired, custom color palette for light/dark themes, system fonts, `class-variance-authority` for component variants.
+**Key Features**
+- WhatsApp Web-style dual-panel UI  
+- Real-time WebSocket updates  
+- Reply-to message support  
+- Role-based authentication (Admin / User)  
+- Integrated webhook listener & diagnostics  
+- Signed media delivery & thumbnail generation  
+- PostgreSQL via Drizzle ORM  
+- Docker-ready for deployment  
+- Cloudflare Tunnel compatible for public SSL access  
 
-**State Management:** TanStack Query for server state, `useWebSocket` hook for real-time updates, local React state for UI, query invalidation on WebSocket events.
+---
 
-**Key Components:** `ConversationList` (with search and archive), `MessageThread`, `MessageBubble`, `MessageInput` (with emoji picker and file upload), `NewConversationDialog`.
+## 🧱 Architecture
 
-### Backend Architecture
+### Frontend
+- **Stack:** React + TypeScript + Vite + Tailwind CSS + shadcn/ui (Radix)  
+- **State:** TanStack Query for server state; local UI state for interactions  
+- **Live updates:** WebSocket hook + query invalidation  
+- **Key Components:**  
+  - `ConversationList` — search, archive, pinning  
+  - `MessageThread` — infinite scroll, skeletons  
+  - `MessageBubble` — dynamic layout & reply threading  
+  - `MessageInput` — emoji picker, file upload  
 
-**Technology Stack:** Node.js with Express.js, TypeScript, WebSocket (ws library), Drizzle ORM, Neon serverless PostgreSQL driver.
+### Backend
+- **Stack:** Node.js + Express + TypeScript + WebSocket (ws) + Drizzle ORM  
+- **Endpoints:** REST CRUD for conversations, messages, users, settings  
+- **Realtime:** WebSocket at `/ws` broadcasting incoming/outgoing events  
+- **Webhook:** `/webhook/meta` for Meta signature-verified message intake  
+- **Auth:** Session-based via Passport.js (scrypt password hashing)  
+- **DB:** PostgreSQL (local or Neon serverless)  
 
-**Server Structure:** Single Express app serving API and static files, WebSocket server co-located.
+---
 
-**API Design:** RESTful endpoints for CRUD operations (conversations, messages), archive functionality, webhook endpoints (`/webhook/meta`), WebSocket at `/ws` for real-time updates. Pagination supported.
+## ⚙️ Installation
 
-**Single Instance Architecture:** WhatsApp Business API is configured using environment variables (access token, phone number ID, webhook verify token, app secret). All conversations and messages use the same WhatsApp instance. Message sending uses a single `MetaProvider` with environment-based credentials.
+### 1️⃣ Prerequisites
+Ensure the following are installed:
+```bash
+Node.js >= 18
+PostgreSQL
+Git
+```
 
-**Real-time Updates:** WebSocket broadcasts `message_incoming` and `message_outgoing` events, triggering client-side query invalidation.
+Optional: run PostgreSQL via Docker
+```bash
+docker run --name whatsapp-db   -e POSTGRES_PASSWORD=yourpassword   -e POSTGRES_DB=whatsapp_chat   -p 5432:5432 -d postgres
+```
 
-### Data Storage
+### 2️⃣ Clone & Install
+```bash
+git clone https://github.com/yourusername/chatsphere.git
+cd chatsphere
+npm install
+```
 
-**Database:** PostgreSQL (via Drizzle ORM).
+### 3️⃣ Database Setup
+```bash
+psql -U postgres
+CREATE DATABASE whatsapp_chat;
+CREATE USER whatsapp_user WITH PASSWORD 'securepassword';
+GRANT ALL PRIVILEGES ON DATABASE whatsapp_chat TO whatsapp_user;
+\q
+npm run db:push
+```
 
-**Schema:**
-- **Conversations:** `id`, `phone`, `displayName`, `metadata` (JSON), `archived` (boolean), `lastAt`, `createdAt`, `updatedAt`.
-- **Messages:** `id`, `conversationId` (FK), `direction`, `body`, `media` (JSON), `providerMessageId`, `status`, `raw` (JSON), `createdAt`.
-- **Relations:** One-to-many from Conversations to Messages.
+### 4️⃣ Create Admin User
+Run this Node script:
+```bash
+npm run seed:admin
+```
 
-**Storage Layer:** `DatabaseStorage` class for CRUD operations on conversations, messages, users; conversation archiving; and automatic `lastAt` updates.
+### 5️⃣ Run Development Server
+```bash
+npm run dev
+```
+Visit: [http://localhost:8080](http://localhost:8080)
 
-### Reply Workflow
+---
 
-- Only inbound messages (`direction = inbound`) are eligible reply targets; outbound bubbles never surface the reply affordance.
-- Choosing to reply shows a compact context bar above the composer highlighting the sender label (e.g., Customer) and a trimmed snippet, with an accessible clear (`X`) control.
-- Composer submissions while a reply target is active send an outbound message that persists `reply_to_message_id` and returns a `replyTo` summary payload with `id`, `content`, `senderLabel`, and `createdAt`.
-- Server-side validation enforces conversation ownership and inbound direction; invalid attempts respond with HTTP 400 so the client can display “You can only reply to incoming messages from this conversation.”
-- Message bubbles that reference another message render a stub that includes a fallback snippet such as `[Original message unavailable]` and let users jump back to the source message.
+## 🔐 Environment Configuration
 
-### Authentication and Authorization
+Create `.env` in the project root:
 
-**Authentication System:** Session-based authentication using Passport.js (local strategy), scrypt hashing for passwords, PostgreSQL-backed session store.
+```bash
+DATABASE_URL=postgresql://postgres:yourpassword@localhost:5432/whatsapp_chat
+SESSION_SECRET=your-secret
+FILES_SIGNING_SECRET=your-file-secret
 
-**User Roles:** `admin` (full access, including webhook settings and user management), `user` (standard messaging access).
+META_PHONE_NUMBER_ID=your_meta_phone_number_id
+META_TOKEN=your_meta_access_token
+META_VERIFY_TOKEN=your_verify_token
+META_APP_SECRET=your_meta_app_secret
 
-**Security Model:** No public self-registration; admin-only user creation. `requireAdmin` middleware enforces role-based access.
+NODE_ENV=development
+PORT=8080
+```
 
-**Protected Routes:** `/`, `/statistics`, `/settings` (admin-only), `/users` (admin-only).
+**Optional Media Config**
+```bash
+MEDIA_SIGNED_URL_TTL_SECONDS=900
+MEDIA_MAX_ORIGINAL_BYTES=25000000
+MEDIA_THUMBNAIL_MAX_WIDTH=512
+MEDIA_THUMBNAIL_MAX_HEIGHT=512
+MEDIA_STORAGE_ROOT=uploads
+```
 
-**Admin Features:** 
-- User creation, listing, editing (username/role), and deletion (with self-deletion protection)
+---
 
-**Statistics Dashboard:** Accessible to all authenticated users, displaying total conversations/messages, incoming/outgoing counts, 7-day message activity trends, top 5 active conversations, and a recent activity feed.
+## 🚀 Run Commands
 
-**Webhook Security:** Webhook URLs with optional app secret signature validation (SHA-256 HMAC).
+| Command | Description |
+|----------|-------------|
+| `npm run dev` | Run in development mode |
+| `npm run build` | Build production bundles |
+| `npm run start` | Start production server |
+| `npm run db:push` | Sync schema with DB |
+| `npm run check` | TypeScript validation |
+| `npm run seed:admin` | Create admin user |
 
-## External Dependencies
+---
 
-**WhatsApp API Provider:**
-- **Meta Cloud API:** Configured using environment variables:
-  - `META_PHONE_NUMBER_ID`: WhatsApp Business Phone Number ID from Meta
-  - `META_TOKEN`: System user access token
-  - `META_VERIFY_TOKEN`: Custom verify token for webhook setup
-  - `META_APP_SECRET` (optional): For webhook signature verification
-  - Webhook URL: `/webhook/meta`
-- **No Twilio Support:** Application exclusively uses Meta Cloud API for all WhatsApp messaging.
+## 🗂️ Project Structure
 
-**Database:**
-- **Neon Serverless PostgreSQL:** Connected via `DATABASE_URL`.
+```
+chatsphere/
+├── client/
+│   └── src/
+│       ├── components/
+│       ├── pages/
+│       └── lib/
+├── server/
+│   ├── index.ts
+│   ├── auth.ts
+│   ├── routes.ts
+│   ├── providers/
+│   └── storage.ts
+├── shared/
+│   └── schema.ts
+├── uploads/
+│   ├── incoming/
+│   └── outbound/
+├── .env
+├── package.json
+└── vite.config.ts
+```
 
-**UI Component Libraries:**
-- Radix UI primitives, shadcn/ui, Lucide React (icons), date-fns.
-- `emoji-picker-react` for emoji selection.
-- `multer` for file uploads.
-- `recharts` for data visualization in the statistics dashboard.
+---
 
-**Development Tools:**
-- `vite-plugin-runtime-error-modal`, `cartographer`, `dev-banner` (MUSTAFA JABER), `tsx`, `esbuild`.
+## 🗄️ Database Schema
 
-## Media Handling & Configuration
+| Table | Fields |
+|--------|--------|
+| `users` | id, username, password, role |
+| `whatsapp_instances` | id, name, token, phone_number_id, active |
+| `conversations` | id, phone, displayName, archived, lastAt |
+| `messages` | id, conversationId, direction, body, media, status, createdAt |
+| `sessions` | id, userId, expiresAt |
 
-- **Signed delivery:** All media is served through `/media/*` with time-limited
-  signatures generated by `FILES_SIGNING_SECRET`. Clients receive fresh URLs on
-  every fetch or WebSocket update.
-- **Storage layout:**
-  - `uploads/incoming/original` – WhatsApp downloads
-  - `uploads/incoming/thumbnails` – generated previews (images, PDFs)
-  - `uploads/outbound/original` – operator uploads
-- **Environment variables:**
-  - `FILES_SIGNING_SECRET` (required) — HMAC secret for signed URLs.
-  - `META_GRAPH_VERSION` (optional) — override the Graph API version (default `v19.0`).
-  - `MEDIA_STORAGE_ROOT` (optional) — custom root directory for persisted media.
-  - `MEDIA_SIGNED_URL_TTL_SECONDS` (optional) — TTL for signed links (default 900s).
-  - `MEDIA_MAX_ORIGINAL_BYTES` (optional) — size ceiling for downloads (default 25 MB).
-  - `MEDIA_DOWNLOAD_MAX_ATTEMPTS`, `MEDIA_DOWNLOAD_RETRY_DELAY_MS` — retry tuning.
-  - `MEDIA_THUMBNAIL_MAX_WIDTH`, `MEDIA_THUMBNAIL_MAX_HEIGHT` — clamp generated previews.
-- **Additional docs:** See `docs/media-pipeline.md` for architecture details and
-  `docs/media-operations.md` for runbook guidance.
+One-to-many relation: `conversation → messages`  
+Drizzle ORM migrations handle schema consistency.
+
+---
+
+## 🎞️ Media System
+
+### Inbound Flow
+1. **Webhook Intake** — `/webhook/meta` verifies Meta signature and writes pending message with `messages.media` metadata.  
+2. **Ingestion Queue** — downloads media from Graph API, applies size limits, saves to `uploads/incoming/original`.  
+3. **Thumbnailing** — via `sharp`; saved to `uploads/incoming/thumbnails`.  
+4. **Persistence** — database updates with media metadata and rebroadcasts via WebSocket.  
+5. **Delivery** — `/media/*` endpoint serves signed URLs (TTL 15 min).
+
+### Outbound Uploads
+Operator uploads stored under `uploads/outbound/original`, re-signed before sending to WhatsApp.
+
+### Security
+- Requires `FILES_SIGNING_SECRET`  
+- Graph URLs are never exposed — only signed local URLs.  
+
+---
+
+## 🧰 Diagnostics & Debugging
+
+### Webhook Diagnostics Tool
+Accessible via the user dropdown → **Webhook Diagnostics**
+
+#### Steps
+1. Launch app and sign in as Admin.  
+2. Navigate to `/diagnostics`.  
+3. Test system status, send test messages, or debug webhook payloads.
+
+#### API Endpoints
+```bash
+GET  /api/webhook/status/{instanceId}
+POST /api/test-message
+POST /webhook/debug/{instanceId}
+```
+
+#### Example Log Output
+```
+✅ Webhook verified
+💬 Processing message from: +1234567890
+💾 Message saved: msg_456
+📡 Broadcast complete in 45ms
+```
+
+---
+
+## 🎨 UI & Design Audit
+
+- Responsive split-pane desktop / single-pane mobile layout  
+- Consistent global actions (theme toggle, account menu)  
+- Message bubbles redesigned with balanced padding and typography  
+- Unified attachment previews (image, doc, pdf)  
+- Improved focus/hover states and accessibility feedback  
+- Mobile layout prioritizes reachable controls and single-pane thread navigation  
+
+---
+
+## 🐞 Common Issues
+
+| Problem | Solution |
+|----------|-----------|
+| **Instance not found** | Verify instance exists and active |
+| **Invalid signature** | Check `META_APP_SECRET` and webhook signature |
+| **Database connection failed** | Verify `DATABASE_URL` and service is running |
+| **No messages showing** | Check WebSocket connection |
+| **Port in use** | `lsof -ti:8080 | xargs kill -9` |
+
+---
+
+## 🧪 Quality Assurance
+
+Before release, validate all media and messaging flows:
+
+1. Send inbound images, PDFs, and DOCX/XLSX/TXT/ZIP files  
+2. Confirm thumbnail rendering and accessibility  
+3. Verify expired URLs regenerate correctly  
+4. Test mobile responsiveness ≤420px  
+5. Run through diagnostic tool for each instance  
+
+---
+
+## 📜 License
+
+This project is released under the **MIT License**.  
+Feel free to fork, modify, and contribute.
