@@ -3,7 +3,7 @@
 A full-stack WhatsApp Web-style chat application built for **real-time business messaging** using the **Meta Cloud API for WhatsApp Business**.  
 It features a responsive WhatsApp-inspired interface, secure authentication, message threading, media ingestion, webhook diagnostics, and a powerful admin dashboard.
 
----
+--- 
 
 ## 🧭 Table of Contents
 
